@@ -6,6 +6,7 @@
 import SwiftUI
 import Photos
 import PhotosUI
+import UIKit
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MARK: - Main Photo Editor View
@@ -427,12 +428,10 @@ struct EffectsPanel: View {
             if sharpness != 0 { operations.append(.sharpen(intensity: sharpness)) }
             
             if !operations.isEmpty {
-                try? await editor.processBatch(
-                    BatchJob(
-                        images: editor.selectedImages.map { $0.current },
-                        operations: operations
-                    )
-                )
+                let targetImages = editor.selectedImages.isEmpty
+                    ? editor.images.map { $0.current }
+                    : editor.selectedImages.map { $0.current }
+                try? await editor.processBatch(BatchJob(images: targetImages, operations: operations))
             }
             dismiss()
         }
