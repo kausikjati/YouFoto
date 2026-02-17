@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import Combine
 import Photos
 import CoreImage
 import Vision
@@ -19,6 +20,8 @@ import UniformTypeIdentifiers
 
 @MainActor
 public class PhotoEditorKit: ObservableObject {
+    public nonisolated let objectWillChange = ObservableObjectPublisher()
+
     
     // ── State ─────────────────────────────────────────────────────────────────
     @Published public var images: [EditableImage] = []
