@@ -169,15 +169,17 @@ struct ContentView: View {
 
                 Spacer(minLength: 0)
 
-                selectionIconButton(systemName: "square.and.arrow.up") {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                }
-                .accessibilityLabel("Share")
+                if !selectedAssetIDs.isEmpty {
+                    selectionIconButton(systemName: "square.and.arrow.up") {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+                    .accessibilityLabel("Share")
 
-                selectionIconButton(systemName: editActionIcon) {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    selectionIconButton(systemName: editActionIcon) {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+                    .accessibilityLabel(editActionLabel)
                 }
-                .accessibilityLabel(editActionLabel)
 
                 selectionIconButton(systemName: "trash") {
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.88)) {
@@ -190,6 +192,8 @@ struct ContentView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 10)
             .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .onTapGesture { }
         }
     }
 
