@@ -22,6 +22,10 @@ struct ContentView: View {
     @State private var authStatus: PHAuthorizationStatus = .notDetermined
     @State private var shareItems: [Any] = []
     @State private var isShareSheetPresented = false
+    @StateObject private var photoEditor = PhotoEditorKit()
+    @State private var isPhotoEditorPresented = false
+    @State private var isPreparingPhotoEditor = false
+    @State private var showEditorUnavailableAlert = false
 
     @Namespace private var filterNS
     @Namespace private var albumNS
@@ -73,6 +77,14 @@ struct ContentView: View {
         }
         .sheet(isPresented: $isShareSheetPresented) {
             ShareSheet(activityItems: shareItems)
+        }
+        .fullScreenCover(isPresented: $isPhotoEditorPresented) {
+            PhotoEditorSessionView(editor: photoEditor)
+        }
+        .alert("Photo editor unavailable", isPresented: $showEditorUnavailableAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Photo editing is currently available only for photos.")
         }
     }
 
@@ -185,6 +197,14 @@ struct ContentView: View {
 
                     selectionIconButton(systemName: editActionIcon) {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        if mediaFilter != .photos {
+                            showEditorUnavailableAlert = true
+                            return
+                        }
+
+                        Task {
+                            await presentPhotoEditor()
+                        }
                     }
                     .accessibilityLabel(editActionLabel)
                 }
@@ -263,6 +283,30 @@ struct ContentView: View {
         }
     }
 
+    private func presentPhotoEditor() async {
+        guard !isPreparingPhotoEditor else { return }
+        isPreparingPhotoEditor = true
+        defer { isPreparingPhotoEditor = false }
+
+        let assets = selectedAssetsInCurrentOrder().filter { $0.mediaType == .image }
+        guard !assets.isEmpty else { return }
+
+        var selectedImages: [UIImage] = []
+        for asset in assets {
+            if let image = await imageForEditing(from: asset) {
+                selectedImages.append(image)
+            }
+        }
+
+        guard !selectedImages.isEmpty else { return }
+
+        await MainActor.run {
+            photoEditor.clear()
+            photoEditor.loadImages(selectedImages)
+            isPhotoEditorPresented = true
+        }
+    }
+
     private func selectedAssetsInCurrentOrder() -> [PHAsset] {
         var assets: [PHAsset] = []
         for index in 0..<fetchResult.count {
@@ -305,6 +349,23 @@ struct ContentView: View {
                 } catch {
                     continuation.resume(returning: nil)
                 }
+            }
+        }
+    }
+
+    private func imageForEditing(from asset: PHAsset) async -> UIImage? {
+        await withCheckedContinuation { continuation in
+            let options = PHImageRequestOptions()
+            options.deliveryMode = .highQualityFormat
+            options.resizeMode = .none
+            options.isNetworkAccessAllowed = true
+
+            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, _ in
+                guard let data, let image = UIImage(data: data) else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(returning: image)
             }
         }
     }
@@ -394,6 +455,27 @@ struct ContentView: View {
 
 #Preview { ContentView() }
 
+private struct PhotoEditorSessionView: View {
+    @ObservedObject var editor: PhotoEditorKit
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        PhotoEditorView(editor: editor)
+            .overlay(alignment: .topLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .bold))
+                        .frame(width: 34, height: 34)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+            }
+    }
+}
+
 private struct ShareSheet: UIViewControllerRepresentable {
     let activityItems: [Any]
 
@@ -404,4 +486,3 @@ private struct ShareSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {
     }
 }
-
