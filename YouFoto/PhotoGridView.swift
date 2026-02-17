@@ -66,7 +66,7 @@ struct PhotoGridView: View {
     }
 
     private func dragSelectionGesture(side: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 0)
+        DragGesture(minimumDistance: 12)
             .onChanged { value in
                 guard isSelectionMode,
                       let index = index(at: value.location, side: side),
