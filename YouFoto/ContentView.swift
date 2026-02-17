@@ -8,7 +8,7 @@ struct ContentView: View {
     @State private var pinchBase = 4
     @State private var isPinching = false
 
-    @State private var selectedMediaFilters: Set<MediaFilter> = Set(MediaFilter.allCases)
+    @State private var mediaFilter: MediaFilter = .photos
     @State private var albumFilter: AlbumFilter = .all
 
     @State private var selectedAsset: PHAsset? = nil
@@ -30,10 +30,10 @@ struct ContentView: View {
                     .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
                     .toolbarBackground(.visible, for: .navigationBar)
                     .safeAreaInset(edge: .bottom) {
-                        Color.clear.frame(height: selectedMediaFilters.contains(.photos) ? 110 : 0)
+                        Color.clear.frame(height: mediaFilter == .photos ? 110 : 0)
                     }
 
-                if selectedMediaFilters.contains(.photos) {
+                if mediaFilter == .photos {
                     AlbumTabBar(selected: $albumFilter, ns: albumNS)
                         .padding(.bottom, 10)
                         .transition(.asymmetric(
@@ -42,9 +42,9 @@ struct ContentView: View {
                         ))
                 }
             }
-            .animation(.spring(response: 0.34, dampingFraction: 0.76), value: selectedMediaFilters)
+            .animation(.spring(response: 0.34, dampingFraction: 0.76), value: mediaFilter)
             .onAppear(perform: setupPhotos)
-            .onChange(of: selectedMediaFilters) { _, _ in loadAssets() }
+            .onChange(of: mediaFilter) { _, _ in loadAssets() }
             .onChange(of: albumFilter) { _, _ in loadAssets() }
         }
         .fullScreenCover(item: $selectedAsset) { asset in
@@ -88,12 +88,12 @@ struct ContentView: View {
 
     @ToolbarContentBuilder
     private var mediaFilterToolbar: some ToolbarContent {
-        ToolbarItem(placement: .principal) {
+        ToolbarItem(placement: .topBarTrailing) {
             HStack(spacing: 8) {
                 ForEach(MediaFilter.allCases) { filter in
-                    let isSelected = selectedMediaFilters.contains(filter)
+                    let isSelected = mediaFilter == filter
                     Button {
-                        toggleFilter(filter)
+                        mediaFilter = filter
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: filter.icon)
@@ -116,16 +116,6 @@ struct ContentView: View {
                 }
             }
         }
-    }
-
-    private func toggleFilter(_ filter: MediaFilter) {
-        if selectedMediaFilters.contains(filter) {
-            guard selectedMediaFilters.count > 1 else { return }
-            selectedMediaFilters.remove(filter)
-        } else {
-            selectedMediaFilters.insert(filter)
-        }
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
     private var pinchGesture: some Gesture {
@@ -168,12 +158,9 @@ struct ContentView: View {
         let opts = PHFetchOptions()
         opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
 
-        let mediaTypes = selectedMediaFilters.map { $0.mediaType.rawValue }
-        if mediaTypes.count == 1, let onlyType = mediaTypes.first {
-            opts.predicate = NSPredicate(format: "mediaType == %d", onlyType)
-        } else {
-            opts.predicate = NSPredicate(format: "mediaType IN %@", mediaTypes)
-        }
+        opts.predicate = mediaFilter == .photos
+            ? NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+            : NSPredicate(format: "mediaType == %d", PHAssetMediaType.video.rawValue)
 
         switch albumFilter {
         case .all:
