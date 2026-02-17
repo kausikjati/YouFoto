@@ -324,6 +324,7 @@ private struct GridCell: View {
     let onTap: (PHAsset) -> Void
 
     @State private var image: UIImage? = nil
+    @State private var tapHighlight = false
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
@@ -336,7 +337,12 @@ private struct GridCell: View {
             }
         }
         .frame(width: side, height: side)
+        .scaleEffect(tapHighlight ? 0.96 : 1)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))   // ← corner radius
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(.white.opacity(tapHighlight ? 0.18 : 0))
+        }
         .overlay(alignment: .bottomLeading) {
             if asset.mediaType == .video {
                 HStack(spacing: 3) {
@@ -350,8 +356,31 @@ private struct GridCell: View {
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .onTapGesture { onTap(asset) }
+        .animation(.easeOut(duration: 0.12), value: tapHighlight)
+        .onTapGesture { handleTap() }
+        .contextMenu {
+            Button {
+                onTap(asset)
+            } label: {
+                Label("Open", systemImage: "arrow.up.forward.app")
+            }
+
+            Label(asset.mediaType == .video ? "Video" : "Photo",
+                  systemImage: asset.mediaType == .video ? "video" : "photo")
+        }
         .task(id: asset.localIdentifier + "_\(Int(side))") { await loadThumb() }
+    }
+
+    private func handleTap() {
+        tapHighlight = true
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+            onTap(asset)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) {
+            tapHighlight = false
+        }
     }
 
     private func durStr(_ s: TimeInterval) -> String {
