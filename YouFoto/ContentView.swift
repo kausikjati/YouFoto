@@ -158,7 +158,7 @@ struct ContentView: View {
 
     private var bottomInsetHeight: CGFloat {
         let albumHeight = mediaFilter == .photos ? 110.0 : 0.0
-        let selectionHeight = isSelectionMode ? 74.0 : 0.0
+        let selectionHeight = isSelectionMode ? 88.0 : 0.0
         return albumHeight + selectionHeight
     }
 
@@ -169,42 +169,68 @@ struct ContentView: View {
 
                 Spacer(minLength: 0)
 
-                Button("Clear") {
+                selectionIconButton(systemName: "square.and.arrow.up") {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
+                .accessibilityLabel("Share")
+
+                selectionIconButton(systemName: editActionIcon) {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
+                .accessibilityLabel(editActionLabel)
+
+                selectionIconButton(systemName: "trash") {
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.88)) {
                         selectedAssetIDs.removeAll()
                     }
                 }
-                .font(.system(size: 14, weight: .semibold))
-                .buttonStyle(.plain)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .glassEffect(.regular.interactive(), in: Capsule())
+                .accessibilityLabel("Clear selection")
 
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
         }
     }
 
     private var selectionCountChip: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
 
             Text("\(selectedAssetIDs.count)")
-                .font(.system(size: 15, weight: .bold).monospacedDigit())
+                .font(.system(size: 17, weight: .bold).monospacedDigit())
                 .contentTransition(.numericText())
                 .animation(.spring(response: 0.22, dampingFraction: 0.9), value: selectedAssetIDs.count)
 
-            Text(selectedAssetIDs.count == 1 ? "item selected" : "items selected")
+            Text("selected")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.secondary)
         }
         .foregroundStyle(.primary)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .glassEffect(.regular, in: Capsule())
+    }
+
+    private var editActionIcon: String {
+        mediaFilter == .photos ? "slider.horizontal.3" : "film.stack"
+    }
+
+    private var editActionLabel: String {
+        mediaFilter == .photos ? "Edit photos" : "Edit videos"
+    }
+
+    private func selectionIconButton(systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 15, weight: .semibold))
+                .frame(width: 42, height: 42)
+        }
+        .buttonStyle(.plain)
+        .disabled(selectedAssetIDs.isEmpty)
+        .opacity(selectedAssetIDs.isEmpty ? 0.45 : 1)
+        .glassEffect(.regular.interactive(), in: Circle())
     }
 
     private var pinchGesture: some Gesture {
