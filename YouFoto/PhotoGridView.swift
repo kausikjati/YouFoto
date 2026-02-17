@@ -6,9 +6,14 @@ struct PhotoGridView: View {
     let fetchResult: PHFetchResult<PHAsset>
     let imageManager: PHCachingImageManager
     let columnCount: Int
+    @Binding var isSelectionMode: Bool
+    @Binding var selectedAssetIDs: Set<String>
     let onTap: (PHAsset) -> Void
 
     private let gap: CGFloat = 3
+    @State private var scrollContentMinY: CGFloat = 0
+    @State private var dragVisitedIndices: Set<Int> = []
+    @State private var dragShouldSelect: Bool?
 
     private var columns: [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: gap), count: columnCount)
@@ -28,19 +33,91 @@ struct PhotoGridView: View {
                     .padding(.top, 100)
                 } else {
                     LazyVGrid(columns: columns, spacing: gap) {
+                        GeometryReader { marker in
+                            Color.clear
+                                .preference(
+                                    key: GridScrollOffsetPreferenceKey.self,
+                                    value: marker.frame(in: .named("gridScroll")).minY
+                                )
+                        }
+                        .frame(height: 0)
+
                         ForEach(0..<fetchResult.count, id: \.self) { i in
                             GridCell(
                                 asset: fetchResult.object(at: i),
                                 imageManager: imageManager,
                                 side: side,
-                                onTap: onTap
+                                isSelectionMode: isSelectionMode,
+                                isSelected: selectedAssetIDs.contains(fetchResult.object(at: i).localIdentifier),
+                                onTap: onTap,
+                                onSelectToggle: { toggleSelection(at: i) }
                             )
                         }
                     }
                     .animation(.spring(response: 0.28, dampingFraction: 0.82), value: columnCount)
                 }
             }
+            .coordinateSpace(name: "gridScroll")
+            .simultaneousGesture(dragSelectionGesture(side: side))
+            .onPreferenceChange(GridScrollOffsetPreferenceKey.self) { scrollContentMinY = $0 }
         }
+    }
+
+    private func dragSelectionGesture(side: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                guard isSelectionMode,
+                      let index = index(at: value.location, side: side),
+                      dragVisitedIndices.insert(index).inserted else { return }
+
+                let assetID = fetchResult.object(at: index).localIdentifier
+                if dragShouldSelect == nil {
+                    dragShouldSelect = !selectedAssetIDs.contains(assetID)
+                }
+                applySelection(assetID: assetID)
+            }
+            .onEnded { _ in
+                dragVisitedIndices.removeAll()
+                dragShouldSelect = nil
+            }
+    }
+
+    private func index(at location: CGPoint, side: CGFloat) -> Int? {
+        let cellPlusGap = side + gap
+        let contentY = location.y - scrollContentMinY
+        guard location.x >= 0, contentY >= 0 else { return nil }
+
+        let col = Int(location.x / cellPlusGap)
+        let row = Int(contentY / cellPlusGap)
+        guard col >= 0, col < columnCount, row >= 0 else { return nil }
+
+        let index = row * columnCount + col
+        return index < fetchResult.count ? index : nil
+    }
+
+    private func toggleSelection(at index: Int) {
+        let id = fetchResult.object(at: index).localIdentifier
+        if selectedAssetIDs.contains(id) {
+            selectedAssetIDs.remove(id)
+        } else {
+            selectedAssetIDs.insert(id)
+        }
+    }
+
+    private func applySelection(assetID: String) {
+        guard let shouldSelect = dragShouldSelect else { return }
+        if shouldSelect {
+            selectedAssetIDs.insert(assetID)
+        } else {
+            selectedAssetIDs.remove(assetID)
+        }
+    }
+}
+
+private struct GridScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
@@ -52,7 +129,10 @@ private struct GridCell: View {
     let asset: PHAsset
     let imageManager: PHCachingImageManager
     let side: CGFloat
+    let isSelectionMode: Bool
+    let isSelected: Bool
     let onTap: (PHAsset) -> Void
+    let onSelectToggle: () -> Void
 
     @State private var image: UIImage? = nil
     @State private var tapHighlight = false
@@ -73,6 +153,15 @@ private struct GridCell: View {
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(.white.opacity(tapHighlight ? 0.18 : 0))
+        }
+        .overlay(alignment: .topTrailing) {
+            if isSelectionMode {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(isSelected ? .white : .white.opacity(0.95))
+                    .shadow(radius: 2)
+                    .padding(6)
+            }
         }
         .overlay(alignment: .bottomLeading) {
             if asset.mediaType == .video {
@@ -105,6 +194,12 @@ private struct GridCell: View {
     }
 
     private func handleTap() {
+        if isSelectionMode {
+            onSelectToggle()
+            UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+            return
+        }
+
         tapHighlight = true
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
 

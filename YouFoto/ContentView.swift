@@ -12,6 +12,8 @@ struct ContentView: View {
     @State private var albumFilter: AlbumFilter = .all
 
     @State private var selectedAsset: PHAsset? = nil
+    @State private var isSelectionMode = false
+    @State private var selectedAssetIDs: Set<String> = []
 
     @State private var fetchResult: PHFetchResult<PHAsset> = PHFetchResult()
     @State private var imageManager = PHCachingImageManager()
@@ -60,6 +62,8 @@ struct ContentView: View {
                 fetchResult: fetchResult,
                 imageManager: imageManager,
                 columnCount: columnCount,
+                isSelectionMode: $isSelectionMode,
+                selectedAssetIDs: $selectedAssetIDs,
                 onTap: { selectedAsset = $0 }
             )
             .gesture(pinchGesture)
@@ -114,6 +118,37 @@ struct ContentView: View {
                     )
                     .glassEffectID(filter.id, in: filterNS)
                 }
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isSelectionMode.toggle()
+                        if !isSelectionMode {
+                            selectedAssetIDs.removeAll()
+                        }
+                    }
+                } label: {
+                    Text(isSelectionMode ? "Done" : "Select")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(isSelectionMode ? .white : .primary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(
+                    isSelectionMode
+                        ? .regular.tint(Color.accentColor.opacity(0.45)).interactive()
+                        : .regular.interactive(),
+                    in: Capsule()
+                )
+            }
+        }
+
+        if isSelectionMode {
+            ToolbarItem(placement: .bottomBar) {
+                Text("Selected: \(selectedAssetIDs.count)")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
             }
         }
     }
