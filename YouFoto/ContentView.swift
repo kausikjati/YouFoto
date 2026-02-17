@@ -324,6 +324,7 @@ private struct GridCell: View {
     let onTap: (PHAsset) -> Void
 
     @State private var image: UIImage? = nil
+    @State private var tapHighlight = false
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
@@ -336,7 +337,12 @@ private struct GridCell: View {
             }
         }
         .frame(width: side, height: side)
+        .scaleEffect(tapHighlight ? 0.96 : 1)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))   // ← corner radius
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(.white.opacity(tapHighlight ? 0.18 : 0))
+        }
         .overlay(alignment: .bottomLeading) {
             if asset.mediaType == .video {
                 HStack(spacing: 3) {
@@ -350,8 +356,33 @@ private struct GridCell: View {
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .onTapGesture { onTap(asset) }
+        .animation(.easeOut(duration: 0.12), value: tapHighlight)
+        .onTapGesture { handleTap() }
+        .contextMenu {
+            Button {
+                onTap(asset)
+            } label: {
+                Label("Open", systemImage: "arrow.up.forward.app")
+            }
+
+            Label(asset.mediaType == .video ? "Video" : "Photo",
+                  systemImage: asset.mediaType == .video ? "video" : "photo")
+        } preview: {
+            GridCellContextPreview(asset: asset, imageManager: imageManager, thumbnail: image)
+        }
         .task(id: asset.localIdentifier + "_\(Int(side))") { await loadThumb() }
+    }
+
+    private func handleTap() {
+        tapHighlight = true
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+            onTap(asset)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) {
+            tapHighlight = false
+        }
     }
 
     private func durStr(_ s: TimeInterval) -> String {
@@ -381,6 +412,123 @@ private struct GridCell: View {
     }
 }
 
+private struct GridCellContextPreview: View {
+    let asset: PHAsset
+    let imageManager: PHCachingImageManager
+    let thumbnail: UIImage?
+
+    var body: some View {
+        Group {
+            if asset.mediaType == .video {
+                GridVideoPreview(asset: asset)
+            } else {
+                GridPhotoPreview(asset: asset, imageManager: imageManager, thumbnail: thumbnail)
+            }
+        }
+        .frame(width: 240, height: 320)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct GridPhotoPreview: View {
+    let asset: PHAsset
+    let imageManager: PHCachingImageManager
+    let thumbnail: UIImage?
+
+    @State private var previewImage: UIImage? = nil
+
+    var body: some View {
+        ZStack {
+            Color.black
+
+            if let previewImage {
+                Image(uiImage: previewImage)
+                    .resizable()
+                    .scaledToFit()
+            } else if let thumbnail {
+                Image(uiImage: thumbnail)
+                    .resizable()
+                    .scaledToFit()
+                    .blur(radius: 1.5)
+            } else {
+                ProgressView().tint(.white)
+            }
+        }
+        .task { await loadPreview() }
+    }
+
+    private func loadPreview() async {
+        let opts = PHImageRequestOptions()
+        opts.isSynchronous = false
+        opts.deliveryMode = .highQualityFormat
+        opts.resizeMode = .exact
+        opts.isNetworkAccessAllowed = true
+
+        let size = CGSize(width: 900, height: 1200)
+        await withCheckedContinuation { cont in
+            var resumed = false
+            imageManager.requestImage(
+                for: asset,
+                targetSize: size,
+                contentMode: .aspectFit,
+                options: opts
+            ) { img, info in
+                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if let img {
+                    previewImage = img
+                }
+                if !resumed, (!isDegraded || img != nil) {
+                    resumed = true
+                    cont.resume()
+                }
+            }
+        }
+    }
+}
+
+private struct GridVideoPreview: View {
+    let asset: PHAsset
+
+    @State private var player: AVPlayer? = nil
+
+    var body: some View {
+        ZStack {
+            Color.black
+
+            if let player {
+                VideoPlayer(player: player)
+                    .onAppear {
+                        player.isMuted = true
+                        player.play()
+                    }
+                    .onDisappear {
+                        player.pause()
+                    }
+            } else {
+                ProgressView().tint(.white)
+            }
+        }
+        .task { await loadPlayer() }
+    }
+
+    private func loadPlayer() async {
+        let opts = PHVideoRequestOptions()
+        opts.deliveryMode = .automatic
+        opts.isNetworkAccessAllowed = true
+
+        await withCheckedContinuation { cont in
+            PHImageManager.default().requestPlayerItem(forVideo: asset, options: opts) { item, _ in
+                DispatchQueue.main.async {
+                    if let item {
+                        player = AVPlayer(playerItem: item)
+                    }
+                    cont.resume()
+                }
+            }
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MARK: - MediaDetailView  (iOS 26 liquid glass, working zoom)
 //
@@ -399,7 +547,6 @@ struct MediaDetailView: View {
     // Photo zoom / pan
     private let minZoom: CGFloat      = 1
     private let maxZoom: CGFloat      = 8
-    private let zoomStep: CGFloat     = 0.75
     @State private var zoomScale: CGFloat  = 1
     @State private var lastZoom: CGFloat   = 1   // scale at start of current pinch gesture
     @State private var panOffset: CGSize   = .zero
@@ -534,20 +681,6 @@ struct MediaDetailView: View {
                 .animation(.easeInOut(duration: 0.2), value: showControls)
             }
 
-            if asset.mediaType == .image {
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        zoomButtons
-                    }
-                    .padding(.trailing, 20)
-                    .padding(.bottom, safeBottom + 20)
-                }
-                .ignoresSafeArea()
-                .opacity(showControls ? 1 : 0)
-                .animation(.easeInOut(duration: 0.2), value: showControls)
-            }
         }
         .ignoresSafeArea()
         .statusBarHidden(true)
@@ -602,28 +735,6 @@ struct MediaDetailView: View {
         }
     }
 
-    private var zoomButtons: some View {
-        VStack(spacing: 10) {
-            zoomButton(icon: "plus") { adjustZoom(by: zoomStep) }
-                .disabled(zoomScale >= maxZoom)
-
-            zoomButton(icon: "minus") { adjustZoom(by: -zoomStep) }
-                .disabled(zoomScale <= minZoom)
-        }
-    }
-
-    private func zoomButton(icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: Circle())
-    }
-
     // ── Helpers ───────────────────────────────────────────────────────────────
     private func doubleTap() {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.72)) {
@@ -637,22 +748,28 @@ struct MediaDetailView: View {
         }
     }
 
-    private func adjustZoom(by delta: CGFloat) {
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-            let updated = (zoomScale + delta).clamped(to: minZoom...maxZoom)
-            zoomScale = updated
-            lastZoom = updated
-            clampPanOffset(animated: false)
-        }
-    }
-
     private func clampedOffset(_ candidate: CGSize) -> CGSize {
-        let maxX = max(0, (screen.width * (zoomScale - 1)) / 2)
-        let maxY = max(0, (screen.height * (zoomScale - 1)) / 2)
+        let fittedSize = fittedImageSize()
+        let maxX = max(0, ((fittedSize.width * zoomScale) - screen.width) / 2)
+        let maxY = max(0, ((fittedSize.height * zoomScale) - screen.height) / 2)
         return CGSize(
             width: candidate.width.clamped(to: -maxX...maxX),
             height: candidate.height.clamped(to: -maxY...maxY)
         )
+    }
+
+    private func fittedImageSize() -> CGSize {
+        guard let imageSize = fullImage?.size,
+              imageSize.width > 0,
+              imageSize.height > 0 else {
+            return screen.size
+        }
+
+        let widthRatio = screen.width / imageSize.width
+        let heightRatio = screen.height / imageSize.height
+        let scale = min(widthRatio, heightRatio)
+
+        return CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
     }
 
     private func clampPanOffset(animated: Bool) {
