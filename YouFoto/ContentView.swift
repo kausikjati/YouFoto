@@ -1,5 +1,7 @@
 import SwiftUI
 import Photos
+import UIKit
+import AVFoundation
 
 struct ContentView: View {
     @State private var columnCount = 4
@@ -18,6 +20,8 @@ struct ContentView: View {
     @State private var fetchResult: PHFetchResult<PHAsset> = PHFetchResult()
     @State private var imageManager = PHCachingImageManager()
     @State private var authStatus: PHAuthorizationStatus = .notDetermined
+    @State private var shareItems: [Any] = []
+    @State private var isShareSheetPresented = false
 
     @Namespace private var filterNS
     @Namespace private var albumNS
@@ -66,6 +70,9 @@ struct ContentView: View {
         }
         .fullScreenCover(item: $selectedAsset) { asset in
             MediaDetailView(asset: asset, imageManager: imageManager)
+        }
+        .sheet(isPresented: $isShareSheetPresented) {
+            ShareSheet(activityItems: shareItems)
         }
     }
 
@@ -172,6 +179,7 @@ struct ContentView: View {
                 if !selectedAssetIDs.isEmpty {
                     selectionIconButton(systemName: "square.and.arrow.up") {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        Task { await presentShareSheet() }
                     }
                     .accessibilityLabel("Share")
 
@@ -181,7 +189,7 @@ struct ContentView: View {
                     .accessibilityLabel(editActionLabel)
                 }
 
-                selectionIconButton(systemName: "trash") {
+                selectionIconButton(systemName: "xmark") {
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.88)) {
                         selectedAssetIDs.removeAll()
                     }
@@ -235,6 +243,86 @@ struct ContentView: View {
         .disabled(selectedAssetIDs.isEmpty)
         .opacity(selectedAssetIDs.isEmpty ? 0.45 : 1)
         .glassEffect(.regular.interactive(), in: Circle())
+    }
+
+    private func presentShareSheet() async {
+        let assets = selectedAssetsInCurrentOrder()
+        guard !assets.isEmpty else { return }
+
+        var resolvedItems: [Any] = []
+        for asset in assets {
+            if let item = await shareItem(for: asset) {
+                resolvedItems.append(item)
+            }
+        }
+
+        guard !resolvedItems.isEmpty else { return }
+        await MainActor.run {
+            shareItems = resolvedItems
+            isShareSheetPresented = true
+        }
+    }
+
+    private func selectedAssetsInCurrentOrder() -> [PHAsset] {
+        var assets: [PHAsset] = []
+        for index in 0..<fetchResult.count {
+            let asset = fetchResult.object(at: index)
+            if selectedAssetIDs.contains(asset.localIdentifier) {
+                assets.append(asset)
+            }
+        }
+        return assets
+    }
+
+    private func shareItem(for asset: PHAsset) async -> Any? {
+        if asset.mediaType == .video {
+            return await videoShareURL(for: asset)
+        }
+        return await photoShareURL(for: asset)
+    }
+
+    private func photoShareURL(for asset: PHAsset) async -> URL? {
+        await withCheckedContinuation { continuation in
+            let options = PHImageRequestOptions()
+            options.deliveryMode = .highQualityFormat
+            options.resizeMode = .none
+            options.isNetworkAccessAllowed = true
+
+            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, _ in
+                guard let data else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+
+                let resource = PHAssetResource.assetResources(for: asset).first
+                let filename = resource?.originalFilename ?? "photo_\(asset.localIdentifier).jpg"
+                let destination = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString + "_" + filename)
+
+                do {
+                    try data.write(to: destination, options: .atomic)
+                    continuation.resume(returning: destination)
+                } catch {
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
+
+    private func videoShareURL(for asset: PHAsset) async -> URL? {
+        await withCheckedContinuation { continuation in
+            let options = PHVideoRequestOptions()
+            options.deliveryMode = .highQualityFormat
+            options.isNetworkAccessAllowed = true
+
+            PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, _ in
+                if let urlAsset = avAsset as? AVURLAsset {
+                    continuation.resume(returning: urlAsset.url)
+                } else {
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
     }
 
     private var pinchGesture: some Gesture {
@@ -305,3 +393,15 @@ struct ContentView: View {
 }
 
 #Preview { ContentView() }
+
+private struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {
+    }
+}
+
