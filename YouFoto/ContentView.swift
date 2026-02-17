@@ -473,8 +473,8 @@ struct MediaDetailView: View {
                     )
                     // Double-tap to zoom
                     .onTapGesture(count: 2) { doubleTap() }
-                    // Single tap to show/hide controls without stealing close-button taps
-                    .onTapGesture { toggleControls() }
+                    // Single tap to show/hide controls; button remains tappable via z-indexed overlay
+                    .simultaneousGesture(TapGesture().onEnded { toggleControls() })
             } else {
                 ProgressView().tint(.white).scaleEffect(1.5)
             }
@@ -491,6 +491,7 @@ struct MediaDetailView: View {
                             .frame(width: 44, height: 44)
                     }
                     .buttonStyle(.plain)
+                    .contentShape(Circle())
                     .glassEffect(.regular.interactive(), in: Circle())
                     .padding(.leading, 20)
                     .padding(.top, safeTop + 8)
@@ -513,6 +514,8 @@ struct MediaDetailView: View {
                 Spacer()
             }
             .ignoresSafeArea()
+            .zIndex(10)
+            .allowsHitTesting(showControls)
             .opacity(showControls ? 1 : 0)
             .animation(.easeInOut(duration: 0.2), value: showControls)
 
