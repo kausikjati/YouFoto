@@ -424,27 +424,21 @@ struct MediaDetailView: View {
             // ── Layer 1: black background ─────────────────────────────────
             Color.black.ignoresSafeArea()
 
-            // ── Layer 2: tap-to-toggle (full screen, lowest interactive) ──
-            // This is the ONLY place single-tap fires, so it never competes
-            // with the close button or zoom gestures.
-            Color.clear
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture { toggleControls() }
-
-            // ── Layer 3: photo/video content (gestures on top of tap layer)
+            // ── Layer 2: photo/video content ───────────────────────────────
             if asset.mediaType == .video, let player {
                 VideoPlayer(player: player)
                     .ignoresSafeArea()
                     .disabled(true)
+                    .contentShape(Rectangle())
+                    .onTapGesture { toggleControls() }
             } else if let img = fullImage {
                 Image(uiImage: img)
                     .resizable()
                     .scaledToFit()
                     .scaleEffect(zoomScale)
                     .offset(panOffset)
-                    // Pinch zoom
-                    .gesture(
+                    // Pinch zoom + pan (simultaneous so both keep working)
+                    .simultaneousGesture(
                         MagnificationGesture()
                             .onChanged { delta in
                                 zoomScale = (lastZoom * delta).clamped(to: 1.0...8.0)
@@ -452,29 +446,35 @@ struct MediaDetailView: View {
                             .onEnded { delta in
                                 let final = (lastZoom * delta).clamped(to: 1.0...8.0)
                                 if final <= 1.05 {
-                                    withAnimation(.spring(response: 0.3)) {  }
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) {
+                                        zoomScale = 1
+                                        lastZoom = 1
+                                        panOffset = .zero
+                                        lastPan = .zero
+                                    }
                                 } else {
                                     zoomScale = final
-                                    lastZoom  = final
+                                    lastZoom = final
                                 }
                             }
                     )
-                    // Pan while zoomed
-                    .gesture(
+                    .simultaneousGesture(
                         DragGesture(minimumDistance: 1)
                             .onChanged { v in
                                 guard zoomScale > 1.0 else { return }
                                 panOffset = CGSize(
-                                    width:  lastPan.width  + v.translation.width,
+                                    width: lastPan.width + v.translation.width,
                                     height: lastPan.height + v.translation.height)
                             }
-                            .onEnded { v in
+                            .onEnded { _ in
                                 guard zoomScale > 1.0 else { return }
                                 lastPan = panOffset
                             }
                     )
                     // Double-tap to zoom
                     .onTapGesture(count: 2) { doubleTap() }
+                    // Single tap to show/hide controls without stealing close-button taps
+                    .onTapGesture { toggleControls() }
             } else {
                 ProgressView().tint(.white).scaleEffect(1.5)
             }
