@@ -32,7 +32,7 @@ struct ContentView: View {
                     .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
                     .toolbarBackground(.visible, for: .navigationBar)
                     .safeAreaInset(edge: .bottom) {
-                        Color.clear.frame(height: mediaFilter == .photos ? 110 : 0)
+                        Color.clear.frame(height: bottomInsetHeight)
                     }
 
                 if mediaFilter == .photos {
@@ -43,10 +43,25 @@ struct ContentView: View {
                             removal: .move(edge: .bottom).combined(with: .opacity)
                         ))
                 }
+
+                if isSelectionMode {
+                    selectionBottomBar
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, mediaFilter == .photos ? 78 : 14)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .zIndex(2)
+                }
             }
             .animation(.spring(response: 0.34, dampingFraction: 0.76), value: mediaFilter)
+            .animation(.spring(response: 0.3, dampingFraction: 0.82), value: isSelectionMode)
             .onAppear(perform: setupPhotos)
-            .onChange(of: mediaFilter) { _, _ in loadAssets() }
+            .onChange(of: mediaFilter) { _, _ in
+                if isSelectionMode {
+                    isSelectionMode = false
+                    selectedAssetIDs.removeAll()
+                }
+                loadAssets()
+            }
             .onChange(of: albumFilter) { _, _ in loadAssets() }
         }
         .fullScreenCover(item: $selectedAsset) { asset in
@@ -66,7 +81,7 @@ struct ContentView: View {
                 selectedAssetIDs: $selectedAssetIDs,
                 onTap: { selectedAsset = $0 }
             )
-            .gesture(pinchGesture)
+            .gesture(pinchGesture, including: isSelectionMode ? .none : .all)
 
         case .denied, .restricted:
             VStack(spacing: 20) {
@@ -139,13 +154,53 @@ struct ContentView: View {
             }
         }
 
-        if isSelectionMode {
-            ToolbarItem(placement: .bottomBar) {
-                Text("Selected: \(selectedAssetIDs.count)")
+    }
+
+    private var bottomInsetHeight: CGFloat {
+        let albumHeight = mediaFilter == .photos ? 110.0 : 0.0
+        let selectionHeight = isSelectionMode ? 84.0 : 0.0
+        return albumHeight + selectionHeight
+    }
+
+    private var selectionBottomBar: some View {
+        GlassEffectContainer(spacing: 10) {
+            HStack(spacing: 10) {
+                Label("\(selectedAssetIDs.count) selected", systemImage: "checkmark.circle.fill")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .glassEffect(.regular, in: Capsule())
+
+                Spacer(minLength: 0)
+
+                Button("Clear") {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.88)) {
+                        selectedAssetIDs.removeAll()
+                    }
+                }
+                .font(.system(size: 14, weight: .semibold))
+                .buttonStyle(.plain)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .glassEffect(.regular.interactive(), in: Capsule())
+
+                Button {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.88)) {
+                        isSelectionMode = false
+                        selectedAssetIDs.removeAll()
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.tint(Color.accentColor.opacity(0.34)).interactive(), in: Circle())
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         }
     }
 

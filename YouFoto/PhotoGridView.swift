@@ -66,6 +66,14 @@ struct PhotoGridView: View {
                 .coordinateSpace(name: "gridScroll")
                 .simultaneousGesture(dragSelectionGesture(side: side, viewportHeight: geo.size.height, proxy: proxy))
                 .onPreferenceChange(GridScrollOffsetPreferenceKey.self) { scrollContentMinY = $0 }
+                .onChange(of: isSelectionMode) { _, active in
+                    if !active {
+                        dragVisitedIndices.removeAll()
+                        dragShouldSelect = nil
+                        dragLocation = nil
+                        stopAutoScroll()
+                    }
+                }
                 .onDisappear(perform: stopAutoScroll)
             }
         }
