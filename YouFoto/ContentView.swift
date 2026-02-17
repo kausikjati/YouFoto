@@ -365,7 +365,7 @@ private struct GridCell: View {
                 Label("Open", systemImage: "arrow.up.forward.app")
             }
 
-            Label(asset.mediaType == .video ? "Video" : "Photo",
+                Label(asset.mediaType == .video ? "Video" : "Photo",
                   systemImage: asset.mediaType == .video ? "video" : "photo")
         } preview: {
             GridCellContextPreview(asset: asset, imageManager: imageManager, thumbnail: image)
