@@ -14,6 +14,9 @@ struct PhotoGridView: View {
     @State private var scrollContentMinY: CGFloat = 0
     @State private var dragVisitedIndices: Set<Int> = []
     @State private var dragShouldSelect: Bool?
+    @State private var dragLocation: CGPoint? = nil
+    @State private var autoScrollTimer: Timer? = nil
+    @State private var isDragSelecting = false
 
     private var columns: [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: gap), count: columnCount)
@@ -22,66 +25,142 @@ struct PhotoGridView: View {
     var body: some View {
         GeometryReader { geo in
             let side = (geo.size.width - CGFloat(columnCount - 1) * gap) / CGFloat(columnCount)
-            ScrollView(showsIndicators: false) {
-                if fetchResult.count == 0 {
-                    ContentUnavailableView(
-                        "No Media",
-                        systemImage: "photo.on.rectangle.angled",
-                        description: Text("Nothing matches this filter.")
-                    )
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 100)
-                } else {
-                    VStack(spacing: 0) {
-                        GeometryReader { marker in
-                            Color.clear
-                                .preference(
-                                    key: GridScrollOffsetPreferenceKey.self,
-                                    value: marker.frame(in: .named("gridScroll")).minY
-                                )
-                        }
-                        .frame(height: 0)
+            ScrollViewReader { proxy in
+                ScrollView(showsIndicators: false) {
+                    if fetchResult.count == 0 {
+                        ContentUnavailableView(
+                            "No Media",
+                            systemImage: "photo.on.rectangle.angled",
+                            description: Text("Nothing matches this filter.")
+                        )
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 100)
+                    } else {
+                        VStack(spacing: 0) {
+                            GeometryReader { marker in
+                                Color.clear
+                                    .preference(
+                                        key: GridScrollOffsetPreferenceKey.self,
+                                        value: marker.frame(in: .named("gridScroll")).minY
+                                    )
+                            }
+                            .frame(height: 0)
 
-                        LazyVGrid(columns: columns, spacing: gap) {
-                            ForEach(0..<fetchResult.count, id: \.self) { i in
-                                GridCell(
-                                    asset: fetchResult.object(at: i),
-                                    imageManager: imageManager,
-                                    side: side,
-                                    isSelectionMode: isSelectionMode,
-                                    isSelected: selectedAssetIDs.contains(fetchResult.object(at: i).localIdentifier),
-                                    onTap: onTap,
-                                    onSelectToggle: { toggleSelection(at: i) }
-                                )
+                            LazyVGrid(columns: columns, spacing: gap) {
+                                ForEach(0..<fetchResult.count, id: \.self) { i in
+                                    GridCell(
+                                        asset: fetchResult.object(at: i),
+                                        imageManager: imageManager,
+                                        side: side,
+                                        isSelectionMode: isSelectionMode,
+                                        isSelected: selectedAssetIDs.contains(fetchResult.object(at: i).localIdentifier),
+                                        onTap: onTap,
+                                        onSelectToggle: { toggleSelection(at: i) }
+                                    )
+                                    .id(i)
+                                }
                             }
                         }
+                        .animation(.spring(response: 0.28, dampingFraction: 0.82), value: columnCount)
                     }
-                    .animation(.spring(response: 0.28, dampingFraction: 0.82), value: columnCount)
                 }
+                .coordinateSpace(name: "gridScroll")
+                .simultaneousGesture(dragSelectionGesture(side: side, viewportHeight: geo.size.height, proxy: proxy))
+                .onPreferenceChange(GridScrollOffsetPreferenceKey.self) { scrollContentMinY = $0 }
+                .onChange(of: isSelectionMode) { _, active in
+                    if !active {
+                        resetDragSelectionState()
+                    }
+                }
+                .onDisappear(perform: stopAutoScroll)
             }
-            .coordinateSpace(name: "gridScroll")
-            .simultaneousGesture(dragSelectionGesture(side: side))
-            .onPreferenceChange(GridScrollOffsetPreferenceKey.self) { scrollContentMinY = $0 }
         }
     }
 
-    private func dragSelectionGesture(side: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 12)
+    private func dragSelectionGesture(side: CGFloat, viewportHeight: CGFloat, proxy: ScrollViewProxy) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.18)
+            .sequenced(before: DragGesture(minimumDistance: 0))
             .onChanged { value in
-                guard isSelectionMode,
-                      let index = index(at: value.location, side: side),
-                      dragVisitedIndices.insert(index).inserted else { return }
+                guard isSelectionMode else { return }
 
-                let assetID = fetchResult.object(at: index).localIdentifier
-                if dragShouldSelect == nil {
-                    dragShouldSelect = !selectedAssetIDs.contains(assetID)
+                switch value {
+                case .first(true):
+                    if !isDragSelecting {
+                        isDragSelecting = true
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+                case .second(true, let dragValue?):
+                    guard isDragSelecting else { return }
+                    dragLocation = dragValue.location
+                    selectAtDragLocation(dragValue.location, side: side)
+                    startAutoScrollIfNeeded(side: side, viewportHeight: viewportHeight, proxy: proxy)
+                default:
+                    break
                 }
-                applySelection(assetID: assetID)
             }
             .onEnded { _ in
-                dragVisitedIndices.removeAll()
-                dragShouldSelect = nil
+                resetDragSelectionState()
             }
+    }
+
+    private func resetDragSelectionState() {
+        dragVisitedIndices.removeAll()
+        dragShouldSelect = nil
+        dragLocation = nil
+        isDragSelecting = false
+        stopAutoScroll()
+    }
+
+    private func selectAtDragLocation(_ location: CGPoint, side: CGFloat) {
+        guard let index = index(at: location, side: side),
+              dragVisitedIndices.insert(index).inserted else { return }
+
+        let assetID = fetchResult.object(at: index).localIdentifier
+        if dragShouldSelect == nil {
+            dragShouldSelect = !selectedAssetIDs.contains(assetID)
+        }
+        applySelection(assetID: assetID)
+    }
+
+    private func startAutoScrollIfNeeded(side: CGFloat, viewportHeight: CGFloat, proxy: ScrollViewProxy) {
+        guard autoScrollTimer == nil else { return }
+
+        autoScrollTimer = Timer.scheduledTimer(withTimeInterval: 0.07, repeats: true) { _ in
+            guard isSelectionMode,
+                  let dragLocation,
+                  fetchResult.count > 0 else {
+                stopAutoScroll()
+                return
+            }
+
+            let edgeThreshold: CGFloat = 72
+            var direction = 0
+            if dragLocation.y > viewportHeight - edgeThreshold {
+                direction = 1
+            } else if dragLocation.y < edgeThreshold {
+                direction = -1
+            }
+
+            guard direction != 0 else { return }
+
+            let cellPlusGap = side + gap
+            let currentRow = max(0, Int((dragLocation.y - scrollContentMinY) / cellPlusGap))
+            let targetRow = max(0, currentRow + direction)
+            let targetIndex = min(max(targetRow * columnCount, 0), fetchResult.count - 1)
+
+            withAnimation(.linear(duration: 0.06)) {
+                proxy.scrollTo(targetIndex, anchor: direction > 0 ? .bottom : .top)
+            }
+
+            DispatchQueue.main.async {
+                selectAtDragLocation(dragLocation, side: side)
+            }
+        }
+    }
+
+    private func stopAutoScroll() {
+        autoScrollTimer?.invalidate()
+        autoScrollTimer = nil
     }
 
     private func index(at location: CGPoint, side: CGFloat) -> Int? {
@@ -142,6 +221,7 @@ private struct GridCell: View {
     let onSelectToggle: () -> Void
 
     @State private var image: UIImage? = nil
+    @State private var imageRequestID: PHImageRequestID? = nil
     @State private var tapHighlight = false
     @Environment(\.displayScale) private var displayScale
 
@@ -185,6 +265,7 @@ private struct GridCell: View {
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .animation(.easeOut(duration: 0.12), value: tapHighlight)
         .onTapGesture { handleTap() }
+        .onDisappear(perform: cancelImageRequest)
         .contextMenu {
             Button {
                 onTap(asset)
@@ -228,20 +309,39 @@ private struct GridCell: View {
     private func loadThumb() async {
         let opts = PHImageRequestOptions()
         opts.isSynchronous = false
-        opts.deliveryMode  = .opportunistic
+        opts.deliveryMode  = .fastFormat
         opts.resizeMode    = .fast
         opts.isNetworkAccessAllowed = true
         let px = CGSize(width: side * displayScale, height: side * displayScale)
+
+        cancelImageRequest()
+
         await withCheckedContinuation { cont in
             var resumed = false
-            imageManager.requestImage(
+            imageRequestID = imageManager.requestImage(
                 for: asset, targetSize: px, contentMode: .aspectFill, options: opts
             ) { img, info in
                 let deg = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if let cancelled = info?[PHImageCancelledKey] as? Bool, cancelled {
+                    if !resumed {
+                        resumed = true
+                        cont.resume()
+                    }
+                    return
+                }
+
                 if !resumed { image = img; resumed = true; cont.resume() }
                 else if !deg, let img { Task { @MainActor in image = img } }
             }
         }
+
+        imageRequestID = nil
+    }
+
+    private func cancelImageRequest() {
+        guard let imageRequestID else { return }
+        imageManager.cancelImageRequest(imageRequestID)
+        self.imageRequestID = nil
     }
 }
 

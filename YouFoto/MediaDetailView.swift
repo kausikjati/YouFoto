@@ -111,18 +111,33 @@ struct MediaDetailView: View {
 
                     Spacer()
 
-                    if let d = asset.creationDate {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(d, style: .date)
-                            Text(d, style: .time)
+                    VStack(alignment: .trailing, spacing: 8) {
+                        if let d = asset.creationDate {
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(d, style: .date)
+                                Text(d, style: .time)
+                            }
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .glassEffect(.regular, in: Capsule())
                         }
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14).padding(.vertical, 8)
-                        .glassEffect(.regular, in: Capsule())
-                        .padding(.trailing, 20)
-                        .padding(.top, safeTop + 8)
+
+                        if asset.mediaType == .video {
+                            Label(fmt(duration), systemImage: "video.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.95))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .glassEffect(
+                                    .regular.tint(Color.accentColor.opacity(0.35)),
+                                    in: Capsule()
+                                )
+                        }
                     }
+                    .padding(.trailing, 20)
+                    .padding(.top, safeTop + 8)
                 }
                 Spacer()
             }
@@ -155,19 +170,35 @@ struct MediaDetailView: View {
     // ── Video control bar — liquid glass ─────────────────────────────────────
     private var videoBar: some View {
         GlassEffectContainer(spacing: 10) {
-            HStack(spacing: 0) {
-                // Play/Pause
+            HStack(spacing: 10) {
+                Button { seek(by: -10) } label: {
+                    Image(systemName: "gobackward.10")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(width: 42, height: 42)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .glassEffect(.regular.interactive(), in: Circle())
+
                 Button { togglePlay() } label: {
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 52, height: 52)
+                        .frame(width: 56, height: 56)
                 }
                 .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .glassEffect(.regular.tint(Color.accentColor.opacity(0.36)).interactive(), in: Circle())
+
+                Button { seek(by: 10) } label: {
+                    Image(systemName: "goforward.10")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(width: 42, height: 42)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
                 .glassEffect(.regular.interactive(), in: Circle())
 
-                // Seek + time labels
-                VStack(spacing: 4) {
+                VStack(spacing: 5) {
                     Slider(
                         value: $currentTime,
                         in: 0...max(duration, 1),
@@ -188,14 +219,17 @@ struct MediaDetailView: View {
                     HStack {
                         Text(fmt(currentTime)); Spacer(); Text(fmt(duration))
                     }
-                    .font(.system(size: 11).monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.75))
+                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.78))
                     .padding(.horizontal, 14)
                 }
                 .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
                 .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
     }
 
@@ -282,6 +316,14 @@ struct MediaDetailView: View {
         isPlaying.toggle()
     }
 
+
+    private func seek(by seconds: Double) {
+        guard let player else { return }
+        let bounded = min(max(currentTime + seconds, 0), duration)
+        currentTime = bounded
+        let target = CMTime(seconds: bounded, preferredTimescale: 600)
+        player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+    }
     private func loadAsset() {
         if asset.mediaType == .video {
             let opts = PHVideoRequestOptions()
