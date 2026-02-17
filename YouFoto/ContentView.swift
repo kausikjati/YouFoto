@@ -27,7 +27,7 @@ struct ContentView: View {
             ZStack(alignment: .bottom) {
                 gridContent
                     .navigationTitle("Library")
-                    .navigationBarTitleDisplayMode(.large)
+                    .navigationBarTitleDisplayMode(.inline)
                     .toolbar { mediaFilterToolbar }
                     .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
                     .toolbarBackground(.visible, for: .navigationBar)
