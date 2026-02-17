@@ -451,9 +451,11 @@ public final class ImageAnalyzer {
         }
 
         let context = CIContext(options: nil)
-        let filter = CIFilter.areaAverage()
-        filter.inputImage = ciImage
-        filter.extent = extent
+        guard let filter = CIFilter(name: "CIAreaAverage") else {
+            return ImageAnalysis(averageBrightness: 0.5, averageContrast: 0.5, hasFaces: false)
+        }
+        filter.setValue(ciImage, forKey: kCIInputImageKey)
+        filter.setValue(CIVector(cgRect: extent), forKey: kCIInputExtentKey)
 
         guard let output = filter.outputImage else {
             return ImageAnalysis(averageBrightness: 0.5, averageContrast: 0.5, hasFaces: false)
@@ -499,29 +501,26 @@ private extension UIImage {
     }
 
     func adjusted(brightness: CGFloat, contrast: CGFloat, saturation: CGFloat) -> UIImage {
-        guard let ci = CIImage(image: self) else { return self }
-        let filter = CIFilter.colorControls()
-        filter.inputImage = ci
-        filter.brightness = Float(brightness)
-        filter.contrast = Float(contrast)
-        filter.saturation = Float(saturation)
+        guard let ci = CIImage(image: self), let filter = CIFilter(name: "CIColorControls") else { return self }
+        filter.setValue(ci, forKey: kCIInputImageKey)
+        filter.setValue(brightness, forKey: kCIInputBrightnessKey)
+        filter.setValue(contrast, forKey: kCIInputContrastKey)
+        filter.setValue(saturation, forKey: kCIInputSaturationKey)
         return Self.render(filter.outputImage) ?? self
     }
 
     func sharpened(intensity: CGFloat) -> UIImage {
-        guard let ci = CIImage(image: self) else { return self }
-        let filter = CIFilter.sharpenLuminance()
-        filter.inputImage = ci
-        filter.sharpness = Float(max(0, intensity * 2))
+        guard let ci = CIImage(image: self), let filter = CIFilter(name: "CISharpenLuminance") else { return self }
+        filter.setValue(ci, forKey: kCIInputImageKey)
+        filter.setValue(max(0, intensity * 2), forKey: kCIInputSharpnessKey)
         return Self.render(filter.outputImage) ?? self
     }
 
     func noiseReduced(strength: CGFloat) -> UIImage {
-        guard let ci = CIImage(image: self) else { return self }
-        let filter = CIFilter.noiseReduction()
-        filter.inputImage = ci
-        filter.noiseLevel = Float(max(0, min(0.1, strength * 0.1)))
-        filter.sharpness = 0.4
+        guard let ci = CIImage(image: self), let filter = CIFilter(name: "CINoiseReduction") else { return self }
+        filter.setValue(ci, forKey: kCIInputImageKey)
+        filter.setValue(max(0, min(0.1, strength * 0.1)), forKey: "inputNoiseLevel")
+        filter.setValue(0.4, forKey: kCIInputSharpnessKey)
         return Self.render(filter.outputImage) ?? self
     }
 
