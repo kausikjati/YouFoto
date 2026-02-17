@@ -142,6 +142,7 @@ private struct GridCell: View {
     let onSelectToggle: () -> Void
 
     @State private var image: UIImage? = nil
+    @State private var imageRequestID: PHImageRequestID? = nil
     @State private var tapHighlight = false
     @Environment(\.displayScale) private var displayScale
 
@@ -185,6 +186,7 @@ private struct GridCell: View {
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .animation(.easeOut(duration: 0.12), value: tapHighlight)
         .onTapGesture { handleTap() }
+        .onDisappear(perform: cancelImageRequest)
         .contextMenu {
             Button {
                 onTap(asset)
@@ -228,20 +230,39 @@ private struct GridCell: View {
     private func loadThumb() async {
         let opts = PHImageRequestOptions()
         opts.isSynchronous = false
-        opts.deliveryMode  = .opportunistic
+        opts.deliveryMode  = .fastFormat
         opts.resizeMode    = .fast
         opts.isNetworkAccessAllowed = true
         let px = CGSize(width: side * displayScale, height: side * displayScale)
+
+        cancelImageRequest()
+
         await withCheckedContinuation { cont in
             var resumed = false
-            imageManager.requestImage(
+            imageRequestID = imageManager.requestImage(
                 for: asset, targetSize: px, contentMode: .aspectFill, options: opts
             ) { img, info in
                 let deg = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if let cancelled = info?[PHImageCancelledKey] as? Bool, cancelled {
+                    if !resumed {
+                        resumed = true
+                        cont.resume()
+                    }
+                    return
+                }
+
                 if !resumed { image = img; resumed = true; cont.resume() }
                 else if !deg, let img { Task { @MainActor in image = img } }
             }
         }
+
+        imageRequestID = nil
+    }
+
+    private func cancelImageRequest() {
+        guard let imageRequestID else { return }
+        imageManager.cancelImageRequest(imageRequestID)
+        self.imageRequestID = nil
     }
 }
 
