@@ -165,12 +165,7 @@ struct ContentView: View {
     private var selectionBottomBar: some View {
         GlassEffectContainer(spacing: 10) {
             HStack(spacing: 10) {
-                Label("\(selectedAssetIDs.count) selected", systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .glassEffect(.regular, in: Capsule())
+                selectionCountChip
 
                 Spacer(minLength: 0)
 
@@ -190,6 +185,26 @@ struct ContentView: View {
             .padding(.vertical, 8)
             .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         }
+    }
+
+    private var selectionCountChip: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 14, weight: .semibold))
+
+            Text("\(selectedAssetIDs.count)")
+                .font(.system(size: 15, weight: .bold).monospacedDigit())
+                .contentTransition(.numericText())
+                .animation(.spring(response: 0.22, dampingFraction: 0.9), value: selectedAssetIDs.count)
+
+            Text(selectedAssetIDs.count == 1 ? "item selected" : "items selected")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .glassEffect(.regular, in: Capsule())
     }
 
     private var pinchGesture: some Gesture {
