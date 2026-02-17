@@ -16,6 +16,7 @@ struct PhotoGridView: View {
     @State private var dragShouldSelect: Bool?
     @State private var dragLocation: CGPoint? = nil
     @State private var autoScrollTimer: Timer? = nil
+    @State private var isDragSelecting = false
 
     private var columns: [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: gap), count: columnCount)
@@ -68,10 +69,7 @@ struct PhotoGridView: View {
                 .onPreferenceChange(GridScrollOffsetPreferenceKey.self) { scrollContentMinY = $0 }
                 .onChange(of: isSelectionMode) { _, active in
                     if !active {
-                        dragVisitedIndices.removeAll()
-                        dragShouldSelect = nil
-                        dragLocation = nil
-                        stopAutoScroll()
+                        resetDragSelectionState()
                     }
                 }
                 .onDisappear(perform: stopAutoScroll)
@@ -80,21 +78,38 @@ struct PhotoGridView: View {
     }
 
     private func dragSelectionGesture(side: CGFloat, viewportHeight: CGFloat, proxy: ScrollViewProxy) -> some Gesture {
-        DragGesture(minimumDistance: 12)
+        LongPressGesture(minimumDuration: 0.18)
+            .sequenced(before: DragGesture(minimumDistance: 0))
             .onChanged { value in
                 guard isSelectionMode else { return }
-                dragLocation = value.location
-                selectAtDragLocation(value.location, side: side)
-                startAutoScrollIfNeeded(side: side, viewportHeight: viewportHeight, proxy: proxy)
+
+                switch value {
+                case .first(true):
+                    if !isDragSelecting {
+                        isDragSelecting = true
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+                case .second(true, let dragValue?):
+                    guard isDragSelecting else { return }
+                    dragLocation = dragValue.location
+                    selectAtDragLocation(dragValue.location, side: side)
+                    startAutoScrollIfNeeded(side: side, viewportHeight: viewportHeight, proxy: proxy)
+                default:
+                    break
+                }
             }
             .onEnded { _ in
-                dragVisitedIndices.removeAll()
-                dragShouldSelect = nil
-                dragLocation = nil
-                stopAutoScroll()
+                resetDragSelectionState()
             }
     }
 
+    private func resetDragSelectionState() {
+        dragVisitedIndices.removeAll()
+        dragShouldSelect = nil
+        dragLocation = nil
+        isDragSelecting = false
+        stopAutoScroll()
+    }
 
     private func selectAtDragLocation(_ location: CGPoint, side: CGFloat) {
         guard let index = index(at: location, side: side),

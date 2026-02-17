@@ -158,7 +158,7 @@ struct ContentView: View {
 
     private var bottomInsetHeight: CGFloat {
         let albumHeight = mediaFilter == .photos ? 110.0 : 0.0
-        let selectionHeight = isSelectionMode ? 84.0 : 0.0
+        let selectionHeight = isSelectionMode ? 74.0 : 0.0
         return albumHeight + selectionHeight
     }
 
@@ -185,18 +185,6 @@ struct ContentView: View {
                 .padding(.vertical, 10)
                 .glassEffect(.regular.interactive(), in: Capsule())
 
-                Button {
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.88)) {
-                        isSelectionMode = false
-                        selectedAssetIDs.removeAll()
-                    }
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 13, weight: .bold))
-                        .frame(width: 34, height: 34)
-                }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.tint(Color.accentColor.opacity(0.34)).interactive(), in: Circle())
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 8)
