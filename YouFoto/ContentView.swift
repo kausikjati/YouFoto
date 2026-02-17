@@ -99,14 +99,10 @@ struct ContentView: View {
                     Button {
                         mediaFilter = filter
                     } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: filter.icon)
-                                .font(.system(size: 13, weight: .semibold))
-                            Text(filter.rawValue)
-                                .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
-                        }
+                        Image(systemName: filter.icon)
+                            .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(isSelected ? .primary : .secondary)
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                     }
                     .buttonStyle(.plain)

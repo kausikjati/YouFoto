@@ -32,7 +32,7 @@ struct PhotoGridView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.top, 100)
                 } else {
-                    LazyVGrid(columns: columns, spacing: gap) {
+                    VStack(spacing: 0) {
                         GeometryReader { marker in
                             Color.clear
                                 .preference(
@@ -42,16 +42,18 @@ struct PhotoGridView: View {
                         }
                         .frame(height: 0)
 
-                        ForEach(0..<fetchResult.count, id: \.self) { i in
-                            GridCell(
-                                asset: fetchResult.object(at: i),
-                                imageManager: imageManager,
-                                side: side,
-                                isSelectionMode: isSelectionMode,
-                                isSelected: selectedAssetIDs.contains(fetchResult.object(at: i).localIdentifier),
-                                onTap: onTap,
-                                onSelectToggle: { toggleSelection(at: i) }
-                            )
+                        LazyVGrid(columns: columns, spacing: gap) {
+                            ForEach(0..<fetchResult.count, id: \.self) { i in
+                                GridCell(
+                                    asset: fetchResult.object(at: i),
+                                    imageManager: imageManager,
+                                    side: side,
+                                    isSelectionMode: isSelectionMode,
+                                    isSelected: selectedAssetIDs.contains(fetchResult.object(at: i).localIdentifier),
+                                    onTap: onTap,
+                                    onSelectToggle: { toggleSelection(at: i) }
+                                )
+                            }
                         }
                     }
                     .animation(.spring(response: 0.28, dampingFraction: 0.82), value: columnCount)
@@ -85,11 +87,16 @@ struct PhotoGridView: View {
     private func index(at location: CGPoint, side: CGFloat) -> Int? {
         let cellPlusGap = side + gap
         let contentY = location.y - scrollContentMinY
-        guard location.x >= 0, contentY >= 0 else { return nil }
+        guard location.x >= 0, location.x < (CGFloat(columnCount) * side + CGFloat(columnCount - 1) * gap),
+              contentY >= 0 else { return nil }
 
         let col = Int(location.x / cellPlusGap)
         let row = Int(contentY / cellPlusGap)
         guard col >= 0, col < columnCount, row >= 0 else { return nil }
+
+        let xRemainder = location.x.truncatingRemainder(dividingBy: cellPlusGap)
+        let yRemainder = contentY.truncatingRemainder(dividingBy: cellPlusGap)
+        guard xRemainder <= side, yRemainder <= side else { return nil }
 
         let index = row * columnCount + col
         return index < fetchResult.count ? index : nil
