@@ -365,8 +365,10 @@ private struct GridCell: View {
                 Label("Open", systemImage: "arrow.up.forward.app")
             }
 
-            Label(asset.mediaType == .video ? "Video" : "Photo",
+                Label(asset.mediaType == .video ? "Video" : "Photo",
                   systemImage: asset.mediaType == .video ? "video" : "photo")
+        } preview: {
+            GridCellContextPreview(asset: asset, imageManager: imageManager, thumbnail: image)
         }
         .task(id: asset.localIdentifier + "_\(Int(side))") { await loadThumb() }
     }
@@ -405,6 +407,123 @@ private struct GridCell: View {
                 let deg = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
                 if !resumed { image = img; resumed = true; cont.resume() }
                 else if !deg, let img { Task { @MainActor in image = img } }
+            }
+        }
+    }
+}
+
+private struct GridCellContextPreview: View {
+    let asset: PHAsset
+    let imageManager: PHCachingImageManager
+    let thumbnail: UIImage?
+
+    var body: some View {
+        Group {
+            if asset.mediaType == .video {
+                GridVideoPreview(asset: asset)
+            } else {
+                GridPhotoPreview(asset: asset, imageManager: imageManager, thumbnail: thumbnail)
+            }
+        }
+        .frame(width: 240, height: 320)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct GridPhotoPreview: View {
+    let asset: PHAsset
+    let imageManager: PHCachingImageManager
+    let thumbnail: UIImage?
+
+    @State private var previewImage: UIImage? = nil
+
+    var body: some View {
+        ZStack {
+            Color.black
+
+            if let previewImage {
+                Image(uiImage: previewImage)
+                    .resizable()
+                    .scaledToFit()
+            } else if let thumbnail {
+                Image(uiImage: thumbnail)
+                    .resizable()
+                    .scaledToFit()
+                    .blur(radius: 1.5)
+            } else {
+                ProgressView().tint(.white)
+            }
+        }
+        .task { await loadPreview() }
+    }
+
+    private func loadPreview() async {
+        let opts = PHImageRequestOptions()
+        opts.isSynchronous = false
+        opts.deliveryMode = .highQualityFormat
+        opts.resizeMode = .exact
+        opts.isNetworkAccessAllowed = true
+
+        let size = CGSize(width: 900, height: 1200)
+        await withCheckedContinuation { cont in
+            var resumed = false
+            imageManager.requestImage(
+                for: asset,
+                targetSize: size,
+                contentMode: .aspectFit,
+                options: opts
+            ) { img, info in
+                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if let img {
+                    previewImage = img
+                }
+                if !resumed, (!isDegraded || img != nil) {
+                    resumed = true
+                    cont.resume()
+                }
+            }
+        }
+    }
+}
+
+private struct GridVideoPreview: View {
+    let asset: PHAsset
+
+    @State private var player: AVPlayer? = nil
+
+    var body: some View {
+        ZStack {
+            Color.black
+
+            if let player {
+                VideoPlayer(player: player)
+                    .onAppear {
+                        player.isMuted = true
+                        player.play()
+                    }
+                    .onDisappear {
+                        player.pause()
+                    }
+            } else {
+                ProgressView().tint(.white)
+            }
+        }
+        .task { await loadPlayer() }
+    }
+
+    private func loadPlayer() async {
+        let opts = PHVideoRequestOptions()
+        opts.deliveryMode = .automatic
+        opts.isNetworkAccessAllowed = true
+
+        await withCheckedContinuation { cont in
+            PHImageManager.default().requestPlayerItem(forVideo: asset, options: opts) { item, _ in
+                DispatchQueue.main.async {
+                    if let item {
+                        player = AVPlayer(playerItem: item)
+                    }
+                    cont.resume()
+                }
             }
         }
     }
