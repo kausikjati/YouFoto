@@ -274,6 +274,8 @@ struct ContentView: View {
                 .font(.system(size: 17, weight: .bold).monospacedDigit())
                 .contentTransition(.numericText())
                 .animation(.spring(response: 0.22, dampingFraction: 0.9), value: selectedAssetIDs.count)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
 
             Text("selected")
                 .font(.system(size: 13, weight: .semibold))
@@ -284,6 +286,8 @@ struct ContentView: View {
         .foregroundStyle(.primary)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+        .frame(minWidth: 140, alignment: .leading)
+        .layoutPriority(1)
         .glassEffect(.regular, in: Capsule())
     }
 
