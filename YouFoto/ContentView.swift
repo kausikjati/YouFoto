@@ -26,6 +26,7 @@ struct ContentView: View {
     @State private var isPhotoEditorPresented = false
     @State private var isPreparingPhotoEditor = false
     @State private var showEditorUnavailableAlert = false
+    private let editorTargetMaxDimension: CGFloat = 2048
 
     @Namespace private var filterNS
     @Namespace private var albumNS
@@ -342,8 +343,10 @@ struct ContentView: View {
         guard !assets.isEmpty else { return }
 
         var selectedImages: [UIImage] = []
+        selectedImages.reserveCapacity(assets.count)
+
         for asset in assets {
-            if let image = await imageForEditing(from: asset) {
+            if let image = await imageForEditing(from: asset, maxDimension: editorTargetMaxDimension) {
                 selectedImages.append(image)
             }
         }
@@ -363,7 +366,7 @@ struct ContentView: View {
             return
         }
 
-        guard let image = await imageForEditing(from: asset) else { return }
+        guard let image = await imageForEditing(from: asset, maxDimension: editorTargetMaxDimension) else { return }
         await MainActor.run {
             photoEditor.clear()
             photoEditor.loadImages([image])
@@ -440,19 +443,31 @@ struct ContentView: View {
         }
     }
 
-    private func imageForEditing(from asset: PHAsset) async -> UIImage? {
+    private func imageForEditing(from asset: PHAsset, maxDimension: CGFloat) async -> UIImage? {
         await withCheckedContinuation { continuation in
             let options = PHImageRequestOptions()
             options.deliveryMode = .highQualityFormat
-            options.resizeMode = .none
+            options.resizeMode = .exact
             options.isNetworkAccessAllowed = true
 
-            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, _ in
-                guard let data, let image = UIImage(data: data) else {
+            let targetSize = CGSize(width: maxDimension, height: maxDimension)
+            PHImageManager.default().requestImage(
+                for: asset,
+                targetSize: targetSize,
+                contentMode: .aspectFit,
+                options: options
+            ) { image, info in
+                if let cancelled = info?[PHImageCancelledKey] as? Bool, cancelled {
                     continuation.resume(returning: nil)
                     return
                 }
-                continuation.resume(returning: image)
+
+                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if let image, !isDegraded {
+                    continuation.resume(returning: image)
+                } else if !isDegraded {
+                    continuation.resume(returning: nil)
+                }
             }
         }
     }

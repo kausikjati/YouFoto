@@ -275,7 +275,9 @@ private struct GridCell: View {
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .animation(.easeOut(duration: 0.12), value: tapHighlight)
         .onTapGesture { handleTap() }
-        .onDisappear(perform: cancelImageRequest)
+        .onDisappear {
+            releaseImage()
+        }
         .contextMenu {
             Button {
                 onShare(asset)
@@ -328,7 +330,7 @@ private struct GridCell: View {
     private func loadThumb() async {
         let opts = PHImageRequestOptions()
         opts.isSynchronous = false
-        opts.deliveryMode = .opportunistic
+        opts.deliveryMode = .fastFormat
         opts.resizeMode = .fast
         opts.isNetworkAccessAllowed = true
 
@@ -355,6 +357,11 @@ private struct GridCell: View {
                 self.imageRequestID = nil
             }
         }
+    }
+
+    private func releaseImage() {
+        cancelImageRequest()
+        image = nil
     }
 
     private func cancelImageRequest() {
