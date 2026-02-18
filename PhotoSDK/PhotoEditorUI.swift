@@ -286,25 +286,31 @@ public struct PhotoEditorView: View {
 
 
     private var toolOptionsBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(options(for: selectedTool), id: \.title) { option in
-                    Button {
-                        option.action()
-                    } label: {
-                        Text(option.title)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.white.opacity(0.10), in: Capsule())
+        Group {
+            if selectedTool == .adjust {
+                adjustLightControls
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(options(for: selectedTool), id: \.title) { option in
+                            Button {
+                                option.action()
+                            } label: {
+                                Text(option.title)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color.white.opacity(0.10), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
                 }
+                .frame(height: 38)
             }
-            .padding(.horizontal, 16)
         }
-        .frame(height: 38)
         .overlay(alignment: .trailing) {
             if isApplyingOperation {
                 ProgressView()
@@ -312,6 +318,48 @@ public struct PhotoEditorView: View {
                     .padding(.trailing, 20)
             }
         }
+    }
+
+    private var adjustLightControls: some View {
+        HStack(spacing: 10) {
+            lightControlRow(title: "Brightness", decrement: .adjustBrightness(-0.08), increment: .adjustBrightness(0.08))
+            lightControlRow(title: "Contrast", decrement: .adjustContrast(-0.08), increment: .adjustContrast(0.08))
+            lightControlRow(title: "Saturation", decrement: .adjustSaturation(-0.08), increment: .adjustSaturation(0.08))
+        }
+        .padding(.horizontal, 14)
+    }
+
+    private func lightControlRow(title: String, decrement: EditOperation, increment: EditOperation) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.82))
+
+            Button {
+                applySingleOperation(decrement)
+            } label: {
+                Image(systemName: "minus")
+                    .font(.system(size: 11, weight: .bold))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            .background(.white.opacity(0.13), in: Circle())
+
+            Button {
+                applySingleOperation(increment)
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .bold))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            .background(.white.opacity(0.13), in: Circle())
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 8)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     // MARK: Actions
@@ -375,14 +423,7 @@ public struct PhotoEditorView: View {
                 ToolOption(title: "Open panel") { showEffectsPanel = true }
             ]
         case .adjust:
-            return [
-                ToolOption(title: "Brightness +") { applySingleOperation(.adjustBrightness(0.08)) },
-                ToolOption(title: "Brightness -") { applySingleOperation(.adjustBrightness(-0.08)) },
-                ToolOption(title: "Contrast +") { applySingleOperation(.adjustContrast(0.08)) },
-                ToolOption(title: "Contrast -") { applySingleOperation(.adjustContrast(-0.08)) },
-                ToolOption(title: "Saturation +") { applySingleOperation(.adjustSaturation(0.08)) },
-                ToolOption(title: "Saturation -") { applySingleOperation(.adjustSaturation(-0.08)) }
-            ]
+            return []
         case .retouch:
             return [
                 ToolOption(title: "Denoise") { applySingleOperation(.denoise(strength: 0.45)) },
