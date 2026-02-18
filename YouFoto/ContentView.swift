@@ -278,6 +278,8 @@ struct ContentView: View {
             Text("selected")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 16)
