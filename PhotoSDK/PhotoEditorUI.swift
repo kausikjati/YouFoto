@@ -1,321 +1,635 @@
 //
 //  PhotoEditorUI.swift
-//  Complete UI implementation with iOS 26 Liquid Glass
+//  PhotoEditorKit UI — iOS 26 glass-style editor experience
 //
 
 import SwiftUI
-import Photos
 import PhotosUI
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MARK: - Main Photo Editor View
-// ─────────────────────────────────────────────────────────────────────────────
+import UIKit
 
 public struct PhotoEditorView: View {
     @ObservedObject public var editor: PhotoEditorKit
-    
-    @State private var showCommandBar = false
-    @State private var showEffectsPanel = false
+
+    @Environment(\.dismiss) private var dismiss
     @State private var selectedPhotos: [PhotosPickerItem] = []
-    
-    @Namespace private var effectNS
-    
+    @State private var activeIndex: Int = 0
+    @State private var selectedTool: EditorTool = .adjust
+    @State private var showEffectsPanel = false
+    @State private var isSaving = false
+    @State private var isApplyingOperation = false
+    @State private var cropScale: CGFloat = 1
+    @State private var cropOffset: CGSize = .zero
+    @State private var lastCropOffset: CGSize = .zero
+    @State private var baseCropScale: CGFloat = 1
+    @State private var stageSize: CGFloat = 0
+
     public init(editor: PhotoEditorKit) {
         self.editor = editor
     }
-    
+
     public var body: some View {
-        NavigationStack {
-            ZStack(alignment: .bottom) {
-                // Main content
-                if editor.images.isEmpty {
-                    emptyState
-                } else {
-                    mainEditor
-                }
-                
-                // Floating command bar
-                if !editor.images.isEmpty {
-                    commandBar
-                        .padding(.bottom, 16)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            if editor.images.isEmpty {
+                emptyState
+            } else {
+                editorCanvas
             }
-            .navigationTitle("Photo Editor")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar { toolbarContent }
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-            .sheet(isPresented: $showEffectsPanel) {
-                EffectsPanel(editor: editor)
-            }
+        }
+        .sheet(isPresented: $showEffectsPanel) {
+            EffectsPanel(editor: editor)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .onChange(of: selectedPhotos) { _, items in
             loadImages(items)
         }
+        .onChange(of: editor.images.count) { _, count in
+            activeIndex = min(activeIndex, max(0, count - 1))
+            syncSelectionWithActiveIndex()
+            resetCropInteraction()
+        }
+        .task(id: editor.images.count) {
+            if !editor.images.isEmpty {
+                syncSelectionWithActiveIndex()
+            }
+        }
     }
-    
-    // ── Empty State ───────────────────────────────────────────────────────────
-    
+
+    // MARK: Empty
+
     private var emptyState: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 22) {
             Image(systemName: "photo.stack")
-                .font(.system(size: 80))
-                .foregroundStyle(.secondary)
-            
-            Text("Start Editing")
-                .font(.system(size: 32, weight: .bold))
-            
-            Text("Select photos or drag and drop to begin")
+                .font(.system(size: 72))
+                .foregroundStyle(.white.opacity(0.85))
+
+            Text("Start editing")
+                .font(.title.bold())
+                .foregroundStyle(.white)
+
+            Text("Pick photos to open the new glass photo editor")
+                .multilineTextAlignment(.center)
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
-            
-            PhotosPicker(
-                selection: $selectedPhotos,
-                maxSelectionCount: 100,
-                matching: .images
-            ) {
+                .foregroundStyle(.white.opacity(0.7))
+
+            PhotosPicker(selection: $selectedPhotos, maxSelectionCount: 100, matching: .images) {
                 Label("Select Photos", systemImage: "photo.on.rectangle.angled")
                     .font(.headline)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 14)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
             }
             .buttonStyle(.plain)
-            .glassEffect(.regular.tint(Color.accentColor.opacity(0.3)).interactive(),
-                         in: Capsule())
+            .glassEffect(.regular.tint(Color.accentColor.opacity(0.35)).interactive(), in: Capsule())
+
+            Button {
+                dismiss()
+            } label: {
+                Text("Close")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+            }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: Capsule())
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
     }
-    
-    // ── Main Editor ───────────────────────────────────────────────────────────
-    
-    private var mainEditor: some View {
-        GeometryReader { geo in
-            ScrollView {
-                LazyVGrid(
-                    columns: columns(for: geo.size.width),
-                    spacing: 12
-                ) {
-                    ForEach(Array(editor.images.enumerated()), id: \.element.id) { index, img in
-                        ImageTile(
-                            image: img,
-                            isSelected: editor.selectedIndices.contains(index),
-                            onTap: { toggleSelection(index) }
-                        )
+
+    // MARK: Main editor
+
+    private var editorCanvas: some View {
+        GeometryReader { geometry in
+            let safeTop = geometry.safeAreaInsets.top
+            let safeBottom = geometry.safeAreaInsets.bottom
+            let stageSide = adaptiveStageSide(in: geometry.size, safeTop: safeTop, safeBottom: safeBottom)
+
+            VStack(spacing: 10) {
+                topBar
+
+                selectedImagesHeader
+
+                imageStage(side: stageSide)
+                    .padding(.horizontal, 14)
+
+                Spacer(minLength: 0)
+
+                VStack(spacing: 10) {
+                    middleActionBar
+                    toolOptionsBar
+                    bottomToolBar
+                }
+            }
+            .padding(.top, safeTop + 4)
+            .padding(.bottom, max(8, safeBottom + 4))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .foregroundStyle(.white)
+        }
+    }
+
+    private func adaptiveStageSide(in size: CGSize, safeTop: CGFloat, safeBottom: CGFloat) -> CGFloat {
+        let horizontalLimit = min(max(size.width - 28, 260), 420)
+
+        // top bar + thumbnail strip + action/tool bars + safe-area paddings
+        let reservedHeight: CGFloat = 58 + 64 + 178 + safeTop + safeBottom
+        let availableHeight = size.height - reservedHeight
+
+        return min(horizontalLimit, max(220, availableHeight))
+    }
+
+    private var topBar: some View {
+        HStack(spacing: 14) {
+            iconButton(systemName: "chevron.left") { dismiss() }
+
+            iconButton(systemName: "arrow.uturn.backward") {
+                undoActiveEditStep()
+            }
+
+            Spacer(minLength: 6)
+
+            Button("Revert") {
+                revertActiveImageToOriginal()
+            }
+            .foregroundStyle(.white)
+            .font(.title3.weight(.semibold))
+            .buttonStyle(.plain)
+
+            Button(isSaving ? "Saving…" : "Save") {
+                saveCurrentEdits()
+            }
+            .disabled(isSaving)
+            .foregroundStyle(.white)
+            .font(.title3.weight(.bold))
+            .buttonStyle(.plain)
+
+            Menu {
+                PhotosPicker(selection: $selectedPhotos, maxSelectionCount: 100, matching: .images) {
+                    Label("Add photos", systemImage: "plus")
+                }
+                Button("Save to Photos") { saveCurrentEdits() }
+                Button("Export files") { exportAll() }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 20, weight: .semibold))
+                    .frame(width: 34, height: 34)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+    }
+
+    private var selectedImagesHeader: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(Array(editor.images.enumerated()), id: \.element.id) { idx, item in
+                    Button {
+                        activeIndex = idx
+                        syncSelectionWithActiveIndex()
+                    } label: {
+                        Image(uiImage: item.current)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 56, height: 56)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(activeIndex == idx ? Color.yellow : Color.white.opacity(0.2), lineWidth: 2)
+                            }
                     }
+                    .buttonStyle(.plain)
                 }
-                .padding()
             }
+            .padding(.horizontal, 14)
         }
     }
-    
-    private func columns(for width: CGFloat) -> [GridItem] {
-        let count = max(2, Int(width / 200))
-        return Array(repeating: GridItem(.flexible(), spacing: 12), count: count)
-    }
-    
-    // ── Command Bar (AI Prompt) ───────────────────────────────────────────────
-    
-    @State private var commandText = ""
-    
-    private var commandBar: some View {
-        GlassEffectContainer(spacing: 12) {
-            HStack(spacing: 12) {
-                // AI prompt input
-                HStack {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 18))
-                        .foregroundStyle(Color.accentColor)
-                    
-                    TextField("Tell me what to do...", text: $commandText)
-                        .textFieldStyle(.plain)
-                        .submitLabel(.send)
-                        .onSubmit { processCommand() }
+
+    private func imageStage(side size: CGFloat) -> some View {
+        return ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+
+            if let image = editor.images[safe: activeIndex]?.current {
+                let imageView = Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: size - 8, height: size - 8)
+                    .scaleEffect(selectedTool == .crop ? cropScale : 1)
+                    .offset(selectedTool == .crop ? cropOffset : .zero)
+                    .animation(.easeOut(duration: 0.15), value: cropScale)
+                    .animation(.easeOut(duration: 0.15), value: cropOffset)
+
+                if selectedTool == .crop {
+                    imageView.gesture(cropGesture(for: size - 8))
+                } else {
+                    imageView
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .glassEffect(.regular, in: Capsule())
-                
-                // Send button
+            }
+
+            GridOverlay(lineColor: .black.opacity(0.22), columns: 3, rows: 3)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            if selectedTool == .crop {
+                VStack {
+                    Text("Pinch and drag to crop")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.35), in: Capsule())
+                    Spacer()
+                }
+                .padding(.top, 10)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.35), lineWidth: 1)
+        }
+        .onAppear { stageSize = size }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var middleActionBar: some View {
+        HStack(spacing: 18) {
+            floatingActionIcon("wand.and.stars") { applySingleOperation(.autoEnhance) }
+            floatingActionIcon("sun.max") { applySingleOperation(.adjustBrightness(0.08)) }
+            floatingActionIcon("rotate.right") { applyQuickRotation(90) }
+            floatingActionIcon("sparkles") { showEffectsPanel = true }
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 12)
+        .glassEffect(.regular, in: Capsule())
+    }
+
+    private var bottomToolBar: some View {
+        HStack(spacing: 24) {
+            ForEach(EditorTool.allCases) { tool in
                 Button {
-                    processCommand()
+                    selectedTool = tool
+                    editor.selectedIndices = [activeIndex]
+                    if tool == .crop {
+                        resetCropInteraction()
+                    }
+                    if tool == .effects {
+                        showEffectsPanel = true
+                    }
                 } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 32))
-                        .foregroundStyle(Color.accentColor)
+                    VStack(spacing: 6) {
+                        Image(systemName: tool.icon)
+                            .font(.system(size: 24, weight: .medium))
+                            .foregroundStyle(selectedTool == tool ? .yellow : .white.opacity(0.92))
+                        Text(tool.title)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(selectedTool == tool ? .yellow : .white.opacity(0.7))
+                    }
+                    .frame(width: 54)
                 }
                 .buttonStyle(.plain)
-                .disabled(commandText.isEmpty)
-                .glassEffect(.regular.interactive(), in: Circle())
-                
-                // Effects button
-                Button {
-                    showEffectsPanel = true
-                } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 20))
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.interactive(), in: Circle())
             }
-            .padding(.horizontal, 12)
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .padding(.horizontal, 16)
     }
-    
-    // ── Toolbar ───────────────────────────────────────────────────────────────
-    
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            if !editor.images.isEmpty {
-                Button {
-                    clearAll()
-                } label: {
-                    Text("Clear")
-                        .font(.body)
+
+
+    private var toolOptionsBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(options(for: selectedTool), id: \.title) { option in
+                    Button {
+                        option.action()
+                    } label: {
+                        Text(option.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.white.opacity(0.10), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
+            .padding(.horizontal, 16)
         }
-        
-        ToolbarItem(placement: .topBarTrailing) {
-            if !editor.images.isEmpty {
-                Menu {
-                    Button("Export All") { exportAll() }
-                    Button("Save to Photos") { saveToPhotos() }
-                    Divider()
-                    Button("Undo") { editor.undo() }
-                    Button("Reset") { editor.reset() }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-            } else {
-                PhotosPicker(
-                    selection: $selectedPhotos,
-                    maxSelectionCount: 100,
-                    matching: .images
-                ) {
-                    Image(systemName: "plus.circle")
-                }
+        .frame(height: 38)
+        .overlay(alignment: .trailing) {
+            if isApplyingOperation {
+                ProgressView()
+                    .tint(.white)
+                    .padding(.trailing, 20)
             }
         }
     }
-    
-    // ── Actions ───────────────────────────────────────────────────────────────
-    
-    private func toggleSelection(_ index: Int) {
-        if editor.selectedIndices.contains(index) {
-            editor.selectedIndices.remove(index)
-        } else {
-            editor.selectedIndices.insert(index)
+
+    // MARK: Actions
+
+    private func iconButton(systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .semibold))
+                .frame(width: 36, height: 36)
         }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
     }
-    
-    private func processCommand() {
-        guard !commandText.isEmpty else { return }
+
+    private func floatingActionIcon(_ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 21, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+        }
+        .buttonStyle(.plain)
+    }
+
+
+    private func applyQuickRotation(_ degrees: CGFloat) {
+        guard editor.images.indices.contains(activeIndex), !isApplyingOperation else { return }
+        isApplyingOperation = true
+        editor.rotateImage(at: activeIndex, degrees: degrees)
+        resetCropInteraction()
+        isApplyingOperation = false
+    }
+
+    private func applySingleOperation(_ operation: EditOperation) {
+        guard editor.images.indices.contains(activeIndex), !isApplyingOperation else { return }
+        isApplyingOperation = true
+        editor.selectedIndices = [activeIndex]
         Task {
-            do {
-                try await editor.processCommand(commandText)
-                commandText = ""
-            } catch {
-                print("Error: \(error)")
+            try? await editor.applyOperation(operation)
+            await MainActor.run { isApplyingOperation = false }
+        }
+    }
+
+    private func applyOperations(_ operations: [EditOperation]) {
+        guard editor.images.indices.contains(activeIndex), !isApplyingOperation else { return }
+        isApplyingOperation = true
+        editor.selectedIndices = [activeIndex]
+        Task {
+            for operation in operations {
+                try? await editor.applyOperation(operation)
+            }
+            await MainActor.run { isApplyingOperation = false }
+        }
+    }
+
+    private func options(for tool: EditorTool) -> [ToolOption] {
+        switch tool {
+        case .crop:
+            return [
+                ToolOption(title: "Zoom +") { cropScale = min(cropScale + 0.2, 4); baseCropScale = cropScale },
+                ToolOption(title: "Zoom -") { cropScale = max(cropScale - 0.2, 1); baseCropScale = cropScale },
+                ToolOption(title: "Rotate Left") { applyQuickRotation(-90) },
+                ToolOption(title: "Rotate Right") { applyQuickRotation(90) },
+                ToolOption(title: "Reset") { resetCropInteraction() },
+                ToolOption(title: "Apply Crop") { applyCropToActiveImage() }
+            ]
+        case .effects:
+            return [
+                ToolOption(title: "Enhance") { applySingleOperation(.autoEnhance) },
+                ToolOption(title: "Vibrant") { applyOperations([.adjustSaturation(0.10), .adjustContrast(0.05)]) },
+                ToolOption(title: "Open panel") { showEffectsPanel = true }
+            ]
+        case .adjust:
+            return [
+                ToolOption(title: "Brightness +") { applySingleOperation(.adjustBrightness(0.08)) },
+                ToolOption(title: "Brightness -") { applySingleOperation(.adjustBrightness(-0.08)) },
+                ToolOption(title: "Contrast +") { applySingleOperation(.adjustContrast(0.08)) },
+                ToolOption(title: "Contrast -") { applySingleOperation(.adjustContrast(-0.08)) },
+                ToolOption(title: "Saturation +") { applySingleOperation(.adjustSaturation(0.08)) },
+                ToolOption(title: "Saturation -") { applySingleOperation(.adjustSaturation(-0.08)) }
+            ]
+        case .retouch:
+            return [
+                ToolOption(title: "Denoise") { applySingleOperation(.denoise(strength: 0.45)) },
+                ToolOption(title: "Sharpen") { applySingleOperation(.sharpen(intensity: 0.35)) }
+            ]
+        case .more:
+            return [
+                ToolOption(title: "Revert") { revertActiveImageToOriginal() },
+                ToolOption(title: "Save") { saveCurrentEdits() },
+                ToolOption(title: "Export") { exportAll() }
+            ]
+        }
+    }
+
+    private func cropGesture(for stageSide: CGFloat) -> some Gesture {
+        SimultaneousGesture(
+            MagnificationGesture()
+                .onChanged { value in
+                    cropScale = min(max(baseCropScale * value, 1), 4)
+                    cropOffset = clampedOffset(cropOffset, stageSide: stageSide, scale: cropScale)
+                }
+                .onEnded { _ in
+                    baseCropScale = cropScale
+                    cropOffset = clampedOffset(cropOffset, stageSide: stageSide, scale: cropScale)
+                },
+            DragGesture()
+                .onChanged { value in
+                    let proposed = CGSize(
+                        width: lastCropOffset.width + value.translation.width,
+                        height: lastCropOffset.height + value.translation.height
+                    )
+                    cropOffset = clampedOffset(proposed, stageSide: stageSide, scale: cropScale)
+                }
+                .onEnded { _ in
+                    lastCropOffset = cropOffset
+                }
+        )
+    }
+
+    private func clampedOffset(_ offset: CGSize, stageSide: CGFloat, scale: CGFloat) -> CGSize {
+        let overflow = max((stageSide * scale - stageSide) / 2, 0)
+        return CGSize(
+            width: min(max(offset.width, -overflow), overflow),
+            height: min(max(offset.height, -overflow), overflow)
+        )
+    }
+
+    private func resetCropInteraction() {
+        cropScale = 1
+        baseCropScale = 1
+        cropOffset = .zero
+        lastCropOffset = .zero
+    }
+
+    private func applyCropToActiveImage() {
+        guard editor.images.indices.contains(activeIndex),
+              let image = editor.images[safe: activeIndex]?.current,
+              stageSize > 0 else { return }
+
+        let side = stageSize - 8
+        let sourceSize = image.size
+        let fitScale = min(side / sourceSize.width, side / sourceSize.height)
+        let drawSize = CGSize(width: sourceSize.width * fitScale * cropScale,
+                              height: sourceSize.height * fitScale * cropScale)
+        let drawOrigin = CGPoint(
+            x: (side - drawSize.width) / 2 + cropOffset.width,
+            y: (side - drawSize.height) / 2 + cropOffset.height
+        )
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = image.scale
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format)
+        let cropped = renderer.image { _ in
+            image.draw(in: CGRect(origin: drawOrigin, size: drawSize))
+        }
+
+        editor.applyDirectEdit(imageAt: activeIndex, image: cropped)
+        resetCropInteraction()
+    }
+
+    private func undoActiveEditStep() {
+        guard editor.images.indices.contains(activeIndex) else { return }
+        editor.selectedIndices = [activeIndex]
+        editor.undo()
+        resetCropInteraction()
+    }
+
+    private func revertActiveImageToOriginal() {
+        guard editor.images.indices.contains(activeIndex) else { return }
+        editor.selectedIndices = [activeIndex]
+        editor.reset()
+        syncSelectionWithActiveIndex()
+        resetCropInteraction()
+    }
+
+    private func syncSelectionWithActiveIndex() {
+        guard editor.images.indices.contains(activeIndex) else { return }
+        editor.selectedIndices = [activeIndex]
+    }
+
+    private func saveCurrentEdits() {
+        guard !isSaving, editor.images.indices.contains(activeIndex) else { return }
+
+        let editedIndices = Set(
+            editor.images.enumerated()
+                .filter { $0.element.history.count > 1 }
+                .map(\.offset)
+        )
+
+        editor.selectedIndices = editedIndices.isEmpty ? [activeIndex] : editedIndices
+
+        isSaving = true
+        Task {
+            try? await editor.saveToPhotos()
+            await MainActor.run {
+                isSaving = false
             }
         }
     }
-    
+
+    private func exportAll() {
+        Task {
+            _ = try? await editor.export(format: .jpeg, quality: 0.95, naming: .timestamp("photoedit-"))
+        }
+    }
+
     private func loadImages(_ items: [PhotosPickerItem]) {
         Task {
             for item in items {
                 if let data = try? await item.loadTransferable(type: Data.self),
                    let image = UIImage(data: data) {
-                    editor.addImage(image)
+                    await MainActor.run { editor.addImage(image) }
                 }
             }
         }
     }
-    
-    private func clearAll() {
-        editor.clear()
-        selectedPhotos.removeAll()
-    }
-    
-    private func exportAll() {
-        Task {
-            _ = try? await editor.export()
+}
+
+private enum EditorTool: String, CaseIterable, Identifiable {
+    case crop
+    case effects
+    case adjust
+    case retouch
+    case more
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .crop: return "Crop"
+        case .effects: return "Effects"
+        case .adjust: return "Light"
+        case .retouch: return "Retouch"
+        case .more: return "More"
         }
     }
-    
-    private func saveToPhotos() {
-        Task {
-            try? await editor.saveToPhotos()
+
+    var icon: String {
+        switch self {
+        case .crop: return "crop"
+        case .effects: return "camera.filters"
+        case .adjust: return "sun.max"
+        case .retouch: return "face.smiling"
+        case .more: return "circle.grid.2x2"
         }
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MARK: - Image Tile
-// ─────────────────────────────────────────────────────────────────────────────
+private struct ToolOption {
+    let title: String
+    let action: () -> Void
+}
 
-struct ImageTile: View {
-    let image: EditableImage
-    let isSelected: Bool
-    let onTap: () -> Void
-    
+private struct GridOverlay: View {
+    let lineColor: Color
+    let columns: Int
+    let rows: Int
+
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Image(uiImage: image.current)
-                .resizable()
-                .scaledToFill()
-                .frame(height: 200)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(
-                            isSelected ? Color.accentColor : Color.clear,
-                            lineWidth: 3
-                        )
+        GeometryReader { geo in
+            Path { path in
+                let width = geo.size.width
+                let height = geo.size.height
+
+                guard columns > 0, rows > 0 else { return }
+
+                for column in 1..<columns {
+                    let x = width * CGFloat(column) / CGFloat(columns)
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: height))
                 }
-            
-            // Selection indicator
-            if isSelected {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 28))
-                    .foregroundStyle(.white)
-                    .background(Circle().fill(Color.accentColor))
-                    .padding(8)
+
+                for row in 1..<rows {
+                    let y = height * CGFloat(row) / CGFloat(rows)
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: width, y: y))
+                }
             }
+            .stroke(lineColor, lineWidth: 0.7)
         }
-        .contentShape(Rectangle())
-        .onTapGesture { onTap() }
+        .allowsHitTesting(false)
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MARK: - Effects Panel
-// ─────────────────────────────────────────────────────────────────────────────
 
 struct EffectsPanel: View {
     @ObservedObject var editor: PhotoEditorKit
     @Environment(\.dismiss) private var dismiss
-    
+
     @State private var brightness: CGFloat = 0
     @State private var contrast: CGFloat = 0
     @State private var saturation: CGFloat = 0
     @State private var sharpness: CGFloat = 0
-    
-    @Namespace private var tabNS
-    
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
-                    // Quick Actions
+                VStack(spacing: 20) {
                     quickActions
-                    
-                    // Adjustments
                     adjustmentsSection
                 }
-                .padding()
+                .padding(16)
             }
             .navigationTitle("Effects")
             .navigationBarTitleDisplayMode(.inline)
@@ -328,96 +642,44 @@ struct EffectsPanel: View {
                         .fontWeight(.semibold)
                 }
             }
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         }
     }
-    
-    // ── Quick Actions ─────────────────────────────────────────────────────────
-    
+
     private var quickActions: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Quick Actions")
                 .font(.headline)
                 .foregroundStyle(.secondary)
-            
-            LazyVGrid(columns: [
-                GridItem(.flexible()),
-                GridItem(.flexible())
-            ], spacing: 12) {
-                QuickActionButton(
-                    title: "Auto Enhance",
-                    icon: "wand.and.stars",
-                    action: { applyOperation(.autoEnhance) }
-                )
-                
-                QuickActionButton(
-                    title: "Remove BG",
-                    icon: "person.crop.circle.badge.minus",
-                    action: { applyOperation(.removeBackground) }
-                )
-                
-                QuickActionButton(
-                    title: "Sharpen",
-                    icon: "triangle",
-                    action: { applyOperation(.sharpen(intensity: 0.5)) }
-                )
-                
-                QuickActionButton(
-                    title: "Denoise",
-                    icon: "camera.filters",
-                    action: { applyOperation(.denoise(strength: 0.5)) }
-                )
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                QuickActionButton(title: "Auto Enhance", icon: "wand.and.stars") { applyOperation(.autoEnhance) }
+                QuickActionButton(title: "Remove BG", icon: "person.crop.circle.badge.minus") { applyOperation(.removeBackground) }
+                QuickActionButton(title: "Sharpen", icon: "triangle") { applyOperation(.sharpen(intensity: 0.5)) }
+                QuickActionButton(title: "Denoise", icon: "camera.filters") { applyOperation(.denoise(strength: 0.5)) }
             }
         }
     }
-    
-    // ── Adjustments ───────────────────────────────────────────────────────────
-    
+
     private var adjustmentsSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             Text("Adjustments")
                 .font(.headline)
                 .foregroundStyle(.secondary)
-            
-            VStack(spacing: 20) {
-                AdjustmentSlider(
-                    title: "Brightness",
-                    icon: "sun.max",
-                    value: $brightness,
-                    range: -1...1
-                )
-                
-                AdjustmentSlider(
-                    title: "Contrast",
-                    icon: "circle.lefthalf.filled",
-                    value: $contrast,
-                    range: -1...1
-                )
-                
-                AdjustmentSlider(
-                    title: "Saturation",
-                    icon: "paintpalette",
-                    value: $saturation,
-                    range: -1...1
-                )
-                
-                AdjustmentSlider(
-                    title: "Sharpness",
-                    icon: "triangle",
-                    value: $sharpness,
-                    range: 0...1
-                )
-            }
+
+            AdjustmentSlider(title: "Brightness", icon: "sun.max", value: $brightness, range: -1...1)
+            AdjustmentSlider(title: "Contrast", icon: "circle.lefthalf.filled", value: $contrast, range: -1...1)
+            AdjustmentSlider(title: "Saturation", icon: "paintpalette", value: $saturation, range: -1...1)
+            AdjustmentSlider(title: "Sharpness", icon: "triangle", value: $sharpness, range: 0...1)
         }
     }
-    
+
     private func applyOperation(_ operation: EditOperation) {
         Task {
             try? await editor.applyOperation(operation)
             dismiss()
         }
     }
-    
+
     private func applyEffects() {
         Task {
             var operations: [EditOperation] = []
@@ -425,34 +687,28 @@ struct EffectsPanel: View {
             if contrast != 0 { operations.append(.adjustContrast(contrast)) }
             if saturation != 0 { operations.append(.adjustSaturation(saturation)) }
             if sharpness != 0 { operations.append(.sharpen(intensity: sharpness)) }
-            
+
             if !operations.isEmpty {
-                try? await editor.processBatch(
-                    BatchJob(
-                        images: editor.selectedImages.map { $0.current },
-                        operations: operations
-                    )
-                )
+                let targetImages = editor.selectedImages.isEmpty
+                    ? editor.images.map { $0.current }
+                    : editor.selectedImages.map { $0.current }
+                try? await editor.processBatch(BatchJob(images: targetImages, operations: operations))
             }
             dismiss()
         }
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MARK: - UI Components
-// ─────────────────────────────────────────────────────────────────────────────
-
 struct QuickActionButton: View {
     let title: String
     let icon: String
     let action: () -> Void
-    
+
     var body: some View {
         Button(action: action) {
             VStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 24))
+                    .font(.system(size: 22))
                 Text(title)
                     .font(.caption)
             }
@@ -460,7 +716,7 @@ struct QuickActionButton: View {
             .padding(.vertical, 16)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 12))
+        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -469,12 +725,12 @@ struct AdjustmentSlider: View {
     let icon: String
     @Binding var value: CGFloat
     let range: ClosedRange<CGFloat>
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: icon)
-                    .font(.system(size: 16))
+                    .font(.system(size: 15))
                     .foregroundStyle(.secondary)
                 Text(title)
                     .font(.subheadline)
@@ -483,11 +739,11 @@ struct AdjustmentSlider: View {
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
-            
+
             Slider(value: $value, in: range)
-                .tint(Color.accentColor)
+                .tint(.accentColor)
         }
         .padding(12)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12))
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }

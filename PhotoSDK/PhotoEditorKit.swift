@@ -7,9 +7,12 @@
 //
 
 import SwiftUI
+import Combine
 import Photos
 import CoreImage
 import Vision
+import ImageIO
+import UniformTypeIdentifiers
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MARK: - PhotoEditorKit Main Class
@@ -17,6 +20,8 @@ import Vision
 
 @MainActor
 public class PhotoEditorKit: ObservableObject {
+    public nonisolated let objectWillChange = ObservableObjectPublisher()
+
     
     // ── State ─────────────────────────────────────────────────────────────────
     @Published public var images: [EditableImage] = []
@@ -61,12 +66,13 @@ public class PhotoEditorKit: ObservableObject {
     
     /// Add a single image to the editor
     public func addImage(_ image: UIImage, metadata: ImageMetadata? = nil) {
-        let editable = EditableImage(
+        var editable = EditableImage(
             id: UUID(),
             original: image,
             current: image,
             metadata: metadata ?? .default
         )
+        editable.history = [ProcessingResult(image: image)]
         images.append(editable)
     }
     
@@ -103,6 +109,7 @@ public class PhotoEditorKit: ObservableObject {
     
     /// Process natural language editing command
     public func processCommand(_ command: String) async throws {
+        objectWillChange.send()
         isProcessing = true
         defer { isProcessing = false }
         
@@ -117,6 +124,7 @@ public class PhotoEditorKit: ObservableObject {
             }
         }
         
+        objectWillChange.send()
         onComplete?(results)
     }
     
@@ -126,6 +134,7 @@ public class PhotoEditorKit: ObservableObject {
     
     /// Process batch operations
     public func processBatch(_ job: BatchJob? = nil) async throws {
+        objectWillChange.send()
         isProcessing = true
         defer { isProcessing = false }
         
@@ -145,6 +154,7 @@ public class PhotoEditorKit: ObservableObject {
             }
         }
         
+        objectWillChange.send()
         onComplete?(results)
     }
     
@@ -163,6 +173,7 @@ public class PhotoEditorKit: ObservableObject {
     
     /// AI analyzes and processes each image optimally
     public func smartProcess(targetStyle: String? = nil) async throws {
+        objectWillChange.send()
         isProcessing = true
         defer { isProcessing = false }
         
@@ -209,6 +220,7 @@ public class PhotoEditorKit: ObservableObject {
         }
         
         progress?.completed = targetImages.count
+        objectWillChange.send()
         onComplete?(results)
     }
     
@@ -218,6 +230,7 @@ public class PhotoEditorKit: ObservableObject {
     
     /// Undo last edit on selected images
     public func undo() {
+        objectWillChange.send()
         for index in selectedIndices {
             guard index < images.count else { continue }
             if images[index].history.count > 1 {
@@ -231,13 +244,27 @@ public class PhotoEditorKit: ObservableObject {
     
     /// Reset selected images to original
     public func reset() {
+        objectWillChange.send()
         for index in selectedIndices {
             guard index < images.count else { continue }
             images[index].current = images[index].original
-            images[index].history.removeAll()
+            images[index].history = [ProcessingResult(image: images[index].original)]
         }
     }
     
+    public func applyDirectEdit(imageAt index: Int, image: UIImage, operations: [EditOperation] = []) {
+        objectWillChange.send()
+        guard index >= 0, index < images.count else { return }
+        images[index].current = image
+        images[index].history.append(ProcessingResult(image: image, operations: operations))
+    }
+
+    public func rotateImage(at index: Int, degrees: CGFloat) {
+        guard index >= 0, index < images.count else { return }
+        let rotated = images[index].current.rotated(byDegrees: degrees)
+        applyDirectEdit(imageAt: index, image: rotated, operations: [.rotate(degrees)])
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // MARK: - Export
     // ──────────────────────────────────────────────────────────────────────────
@@ -252,13 +279,13 @@ public class PhotoEditorKit: ObservableObject {
         var urls: [URL] = []
         
         for (i, img) in targetImages.enumerated() {
-            let filename = naming.generate(index: i, original: img.metadata.filename)
+            let generatedName = naming.generate(index: i, original: img.metadata.filename)
+            let filename = generatedName.replacingOccurrences(of: ".png", with: "") + format.fileExtension
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-            
-            if let data = img.current.pngData() {
-                try data.write(to: url)
-                urls.append(url)
-            }
+
+            guard let data = img.current.data(for: format, quality: quality) else { continue }
+            try data.write(to: url)
+            urls.append(url)
         }
         
         return urls
@@ -273,6 +300,338 @@ public class PhotoEditorKit: ObservableObject {
                 PHAssetChangeRequest.creationRequestForAsset(from: img.current)
             }
         }
+    }
+}
+
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - Core SDK Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+public struct BatchJob {
+    public let images: [UIImage]
+    public let operations: [EditOperation]
+
+    public init(images: [UIImage], operations: [EditOperation]) {
+        self.images = images
+        self.operations = operations
+    }
+}
+
+public struct ImageAnalysis {
+    public var averageBrightness: CGFloat
+    public var averageContrast: CGFloat
+    public var hasFaces: Bool
+
+    public init(averageBrightness: CGFloat, averageContrast: CGFloat, hasFaces: Bool) {
+        self.averageBrightness = averageBrightness
+        self.averageContrast = averageContrast
+        self.hasFaces = hasFaces
+    }
+}
+
+public enum EditOperation {
+    case removeBackground
+    case adjustBrightness(CGFloat)
+    case adjustContrast(CGFloat)
+    case adjustSaturation(CGFloat)
+    case rotate(CGFloat)
+    case sharpen(intensity: CGFloat)
+    case denoise(strength: CGFloat)
+    case autoEnhance
+}
+
+@MainActor
+public final class EditorAgent {
+    public enum Style {
+        case professional, natural, vibrant, moody
+    }
+
+    public weak var editor: PhotoEditorKit?
+    public var style: Style = .natural
+    public var aggressiveness: CGFloat = 0.5
+    public var maintainConsistency = true
+    public var learnFromEdits = true
+
+    public init(config: EditorConfig) {
+        self.learnFromEdits = config.learnFromEdits
+    }
+
+    public func configure(style: Style, aggressiveness: CGFloat, maintainConsistency: Bool, learnFromEdits: Bool) {
+        self.style = style
+        self.aggressiveness = aggressiveness
+        self.maintainConsistency = maintainConsistency
+        self.learnFromEdits = learnFromEdits
+    }
+
+    public func processCommand(_ command: String, images: [EditableImage]) async throws -> [ProcessingResult] {
+        let lowered = command.lowercased()
+        var operations: [EditOperation] = []
+
+        if lowered.contains("bright") { operations.append(.adjustBrightness(0.12 + (aggressiveness * 0.08))) }
+        if lowered.contains("contrast") { operations.append(.adjustContrast(0.1 + (aggressiveness * 0.1))) }
+        if lowered.contains("saturat") || lowered.contains("vibrant") { operations.append(.adjustSaturation(0.1)) }
+        if lowered.contains("sharpen") { operations.append(.sharpen(intensity: 0.5)) }
+        if lowered.contains("denoise") || lowered.contains("noise") { operations.append(.denoise(strength: 0.5)) }
+        if lowered.contains("background") { operations.append(.removeBackground) }
+        if lowered.contains("rotate") { operations.append(.rotate(90)) }
+
+        if operations.isEmpty {
+            operations = [.autoEnhance]
+        }
+
+        let processor = BatchProcessor()
+        let job = BatchJob(images: images.map { $0.current }, operations: operations)
+        return try await processor.process(job)
+    }
+
+    public func generateOperations(analyses: [ImageAnalysis], targetStyle: String?) async throws -> [[EditOperation]] {
+        analyses.map { analysis in
+            var operations: [EditOperation] = [.autoEnhance]
+            if analysis.averageBrightness < 0.45 { operations.append(.adjustBrightness(0.12)) }
+            if analysis.averageContrast < 0.45 { operations.append(.adjustContrast(0.1)) }
+            if let targetStyle, targetStyle.lowercased().contains("vibrant") {
+                operations.append(.adjustSaturation(0.12))
+            }
+            if analysis.hasFaces { operations.append(.sharpen(intensity: 0.25)) }
+            return operations
+        }
+    }
+}
+
+public final class BatchProcessor {
+    public var onProgress: ((ProcessingProgress) -> Void)?
+
+    public init() {}
+
+    public func process(_ job: BatchJob) async throws -> [ProcessingResult] {
+        guard !job.images.isEmpty else { return [] }
+
+        var results: [ProcessingResult] = []
+        results.reserveCapacity(job.images.count)
+
+        for (index, image) in job.images.enumerated() {
+            let start = Date()
+            do {
+                let output = try Self.apply(operations: job.operations, to: image)
+                results.append(ProcessingResult(
+                    image: output,
+                    operations: job.operations,
+                    success: true,
+                    processingTime: Date().timeIntervalSince(start)
+                ))
+            } catch {
+                results.append(ProcessingResult(
+                    image: image,
+                    operations: job.operations,
+                    success: false,
+                    error: error,
+                    processingTime: Date().timeIntervalSince(start)
+                ))
+            }
+
+            onProgress?(ProcessingProgress(total: job.images.count, completed: index + 1, currentOperation: "Editing photos"))
+        }
+
+        return results
+    }
+
+    private static func apply(operations: [EditOperation], to image: UIImage) throws -> UIImage {
+        var output = image
+        for operation in operations {
+            switch operation {
+            case .adjustBrightness(let value):
+                output = output.adjusted(brightness: value, contrast: 1, saturation: 1)
+            case .adjustContrast(let value):
+                output = output.adjusted(brightness: 0, contrast: 1 + value, saturation: 1)
+            case .adjustSaturation(let value):
+                output = output.adjusted(brightness: 0, contrast: 1, saturation: 1 + value)
+            case .rotate(let degrees):
+                output = output.rotated(byDegrees: degrees)
+            case .sharpen(let intensity):
+                output = output.sharpened(intensity: intensity)
+            case .denoise(let strength):
+                output = output.noiseReduced(strength: strength)
+            case .autoEnhance:
+                output = output.autoEnhanced()
+            case .removeBackground:
+                continue
+            }
+        }
+        return output
+    }
+}
+
+public final class ImageAnalyzer {
+    public init() {}
+
+    public func analyze(_ image: UIImage) async throws -> ImageAnalysis {
+        guard let ciImage = CIImage(image: image) else {
+            return ImageAnalysis(averageBrightness: 0.5, averageContrast: 0.5, hasFaces: false)
+        }
+
+        let extent = ciImage.extent
+        guard !extent.isEmpty else {
+            return ImageAnalysis(averageBrightness: 0.5, averageContrast: 0.5, hasFaces: false)
+        }
+
+        let context = CIContext(options: nil)
+        guard let filter = CIFilter(name: "CIAreaAverage") else {
+            return ImageAnalysis(averageBrightness: 0.5, averageContrast: 0.5, hasFaces: false)
+        }
+        filter.setValue(ciImage, forKey: kCIInputImageKey)
+        filter.setValue(CIVector(cgRect: extent), forKey: kCIInputExtentKey)
+
+        guard let output = filter.outputImage else {
+            return ImageAnalysis(averageBrightness: 0.5, averageContrast: 0.5, hasFaces: false)
+        }
+
+        var bitmap = [UInt8](repeating: 0, count: 4)
+        context.render(output, toBitmap: &bitmap, rowBytes: 4, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
+
+        let brightness = (CGFloat(bitmap[0]) + CGFloat(bitmap[1]) + CGFloat(bitmap[2])) / (3 * 255)
+        return ImageAnalysis(averageBrightness: brightness, averageContrast: 0.5, hasFaces: false)
+    }
+}
+
+private extension ImageFormat {
+    var fileExtension: String {
+        switch self {
+        case .png: return ".png"
+        case .jpeg: return ".jpg"
+        case .heic: return ".heic"
+        }
+    }
+}
+
+private extension UIImage {
+    func data(for format: ImageFormat, quality: CGFloat) -> Data? {
+        switch format {
+        case .png:
+            return pngData()
+        case .jpeg:
+            return jpegData(compressionQuality: quality)
+        case .heic:
+            if #available(iOS 11.0, *), let cg = cgImage {
+                let data = NSMutableData()
+                guard let destination = CGImageDestinationCreateWithData(data, UTType.heic.identifier as CFString, 1, nil) else {
+                    return jpegData(compressionQuality: quality)
+                }
+                CGImageDestinationAddImage(destination, cg, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
+                guard CGImageDestinationFinalize(destination) else { return nil }
+                return data as Data
+            }
+            return jpegData(compressionQuality: quality)
+        }
+    }
+
+    func adjusted(brightness: CGFloat, contrast: CGFloat, saturation: CGFloat) -> UIImage {
+        guard let ci = CIImage(image: self), let filter = CIFilter(name: "CIColorControls") else { return self }
+        filter.setValue(ci, forKey: kCIInputImageKey)
+        filter.setValue(brightness, forKey: kCIInputBrightnessKey)
+        filter.setValue(contrast, forKey: kCIInputContrastKey)
+        filter.setValue(saturation, forKey: kCIInputSaturationKey)
+        return Self.render(filter.outputImage, source: self) ?? self
+    }
+
+    func sharpened(intensity: CGFloat) -> UIImage {
+        guard let ci = CIImage(image: self), let filter = CIFilter(name: "CISharpenLuminance") else { return self }
+        filter.setValue(ci, forKey: kCIInputImageKey)
+        filter.setValue(max(0, intensity * 2), forKey: kCIInputSharpnessKey)
+        return Self.render(filter.outputImage, source: self) ?? self
+    }
+
+    func noiseReduced(strength: CGFloat) -> UIImage {
+        guard let ci = CIImage(image: self), let filter = CIFilter(name: "CINoiseReduction") else { return self }
+        filter.setValue(ci, forKey: kCIInputImageKey)
+        filter.setValue(max(0, min(0.1, strength * 0.1)), forKey: "inputNoiseLevel")
+        filter.setValue(0.4, forKey: kCIInputSharpnessKey)
+        return Self.render(filter.outputImage, source: self) ?? self
+    }
+
+    func autoEnhanced() -> UIImage {
+        guard let ci = CIImage(image: self) else { return self }
+        let adjusted = ci.autoAdjustmentFilters().reduce(ci) { current, filter in
+            filter.setValue(current, forKey: kCIInputImageKey)
+            return filter.outputImage ?? current
+        }
+        return Self.render(adjusted, source: self) ?? self
+    }
+
+    func rotated(byDegrees degrees: CGFloat) -> UIImage {
+        let normalized = Int((degrees.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360))
+
+        if let quarterTurns = [0, 90, 180, 270].first(where: { $0 == normalized }),
+           let cgImage,
+           let orientation = Self.rotatedOrientation(imageOrientation, degrees: quarterTurns) {
+            return UIImage(cgImage: cgImage, scale: scale, orientation: orientation)
+        }
+
+        let radians = degrees * .pi / 180
+        let newSize = CGRect(origin: .zero, size: size)
+            .applying(CGAffineTransform(rotationAngle: radians))
+            .integral.size
+
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { context in
+            context.cgContext.translateBy(x: newSize.width / 2, y: newSize.height / 2)
+            context.cgContext.rotate(by: radians)
+            draw(in: CGRect(x: -size.width / 2, y: -size.height / 2, width: size.width, height: size.height))
+        }
+    }
+
+
+    private static func rotatedOrientation(_ orientation: UIImage.Orientation, degrees: Int) -> UIImage.Orientation? {
+        switch degrees {
+        case 0:
+            return orientation
+        case 90:
+            switch orientation {
+            case .up: return .right
+            case .right: return .down
+            case .down: return .left
+            case .left: return .up
+            case .upMirrored: return .rightMirrored
+            case .rightMirrored: return .downMirrored
+            case .downMirrored: return .leftMirrored
+            case .leftMirrored: return .upMirrored
+            @unknown default: return nil
+            }
+        case 180:
+            switch orientation {
+            case .up: return .down
+            case .right: return .left
+            case .down: return .up
+            case .left: return .right
+            case .upMirrored: return .downMirrored
+            case .rightMirrored: return .leftMirrored
+            case .downMirrored: return .upMirrored
+            case .leftMirrored: return .rightMirrored
+            @unknown default: return nil
+            }
+        case 270:
+            switch orientation {
+            case .up: return .left
+            case .right: return .up
+            case .down: return .right
+            case .left: return .down
+            case .upMirrored: return .leftMirrored
+            case .rightMirrored: return .upMirrored
+            case .downMirrored: return .rightMirrored
+            case .leftMirrored: return .downMirrored
+            @unknown default: return nil
+            }
+        default:
+            return nil
+        }
+    }
+
+    private static func render(_ ciImage: CIImage?, source: UIImage) -> UIImage? {
+        guard let ciImage else { return nil }
+        let context = CIContext(options: nil)
+        guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else { return nil }
+        return UIImage(cgImage: cgImage, scale: source.scale, orientation: source.imageOrientation)
     }
 }
 
