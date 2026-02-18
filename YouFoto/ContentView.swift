@@ -73,7 +73,19 @@ struct ContentView: View {
             .onChange(of: albumFilter) { _, _ in loadAssets() }
         }
         .fullScreenCover(item: $selectedAsset) { asset in
-            MediaDetailView(asset: asset, imageManager: imageManager)
+            MediaDetailView(
+                asset: asset,
+                imageManager: imageManager,
+                onShare: { media in
+                    Task { await presentShareSheet(for: media) }
+                },
+                onEdit: { media in
+                    Task { await presentPhotoEditor(for: media) }
+                },
+                onDelete: { media in
+                    Task { await deleteAssets([media]) }
+                }
+            )
         }
         .sheet(isPresented: $isShareSheetPresented) {
             ShareSheet(activityItems: shareItems)
@@ -98,7 +110,16 @@ struct ContentView: View {
                 columnCount: columnCount,
                 isSelectionMode: $isSelectionMode,
                 selectedAssetIDs: $selectedAssetIDs,
-                onTap: { selectedAsset = $0 }
+                onTap: { selectedAsset = $0 },
+                onShare: { asset in
+                    Task { await presentShareSheet(for: asset) }
+                },
+                onEdit: { asset in
+                    Task { await presentPhotoEditor(for: asset) }
+                },
+                onDelete: { asset in
+                    Task { await deleteAssets([asset]) }
+                }
             )
             .gesture(pinchGesture, including: isSelectionMode ? .none : .all)
 
@@ -283,6 +304,14 @@ struct ContentView: View {
         }
     }
 
+    private func presentShareSheet(for asset: PHAsset) async {
+        guard let item = await shareItem(for: asset) else { return }
+        await MainActor.run {
+            shareItems = [item]
+            isShareSheetPresented = true
+        }
+    }
+
     private func presentPhotoEditor() async {
         guard !isPreparingPhotoEditor else { return }
         isPreparingPhotoEditor = true
@@ -304,6 +333,41 @@ struct ContentView: View {
             photoEditor.clear()
             photoEditor.loadImages(selectedImages)
             isPhotoEditorPresented = true
+        }
+    }
+
+    private func presentPhotoEditor(for asset: PHAsset) async {
+        guard asset.mediaType == .image else {
+            await MainActor.run { showEditorUnavailableAlert = true }
+            return
+        }
+
+        guard let image = await imageForEditing(from: asset) else { return }
+        await MainActor.run {
+            photoEditor.clear()
+            photoEditor.loadImages([image])
+            isPhotoEditorPresented = true
+        }
+    }
+
+    private func deleteAssets(_ assets: [PHAsset]) async {
+        guard !assets.isEmpty else { return }
+
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.deleteAssets(assets as NSArray)
+            }
+
+            await MainActor.run {
+                let deletedIDs = Set(assets.map(\.localIdentifier))
+                selectedAssetIDs.subtract(deletedIDs)
+                if let selectedAsset, deletedIDs.contains(selectedAsset.localIdentifier) {
+                    self.selectedAsset = nil
+                }
+                loadAssets()
+            }
+        } catch {
+            // Intentionally ignored for now; Photos framework handles permission errors.
         }
     }
 
