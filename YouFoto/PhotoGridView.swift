@@ -309,33 +309,33 @@ private struct GridCell: View {
     private func loadThumb() async {
         let opts = PHImageRequestOptions()
         opts.isSynchronous = false
-        opts.deliveryMode  = .fastFormat
-        opts.resizeMode    = .fast
+        opts.deliveryMode = .opportunistic
+        opts.resizeMode = .fast
         opts.isNetworkAccessAllowed = true
-        let px = CGSize(width: side * displayScale, height: side * displayScale)
 
+        let px = CGSize(width: side * displayScale, height: side * displayScale)
         cancelImageRequest()
 
-        await withCheckedContinuation { cont in
-            var resumed = false
-            imageRequestID = imageManager.requestImage(
-                for: asset, targetSize: px, contentMode: .aspectFill, options: opts
-            ) { img, info in
-                let deg = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                if let cancelled = info?[PHImageCancelledKey] as? Bool, cancelled {
-                    if !resumed {
-                        resumed = true
-                        cont.resume()
-                    }
-                    return
-                }
+        imageRequestID = imageManager.requestImage(
+            for: asset,
+            targetSize: px,
+            contentMode: .aspectFill,
+            options: opts
+        ) { img, info in
+            if let cancelled = info?[PHImageCancelledKey] as? Bool, cancelled {
+                return
+            }
 
-                if !resumed { image = img; resumed = true; cont.resume() }
-                else if !deg, let img { Task { @MainActor in image = img } }
+            guard let img else { return }
+            Task { @MainActor in
+                self.image = img
+            }
+
+            let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+            if !isDegraded {
+                self.imageRequestID = nil
             }
         }
-
-        imageRequestID = nil
     }
 
     private func cancelImageRequest() {
@@ -408,7 +408,9 @@ private struct GridPhotoPreview: View {
             ) { img, info in
                 let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
                 if let img {
-                    previewImage = img
+                    Task { @MainActor in
+                        previewImage = img
+                    }
                 }
                 if !resumed, (!isDegraded || img != nil) {
                     resumed = true

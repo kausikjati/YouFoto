@@ -16,6 +16,7 @@ public struct PhotoEditorView: View {
     @State private var selectedTool: EditorTool = .adjust
     @State private var showEffectsPanel = false
     @State private var isSaving = false
+    @State private var isApplyingOperation = false
 
     public init(editor: PhotoEditorKit) {
         self.editor = editor
@@ -104,6 +105,8 @@ public struct PhotoEditorView: View {
 
             middleActionBar
 
+            toolOptionsBar
+
             bottomToolBar
         }
         .padding(.top, 8)
@@ -156,39 +159,27 @@ public struct PhotoEditorView: View {
     }
 
     private var selectedImagesHeader: some View {
-        VStack(spacing: 10) {
-            Text("selected images")
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(Color.red.opacity(0.85))
-                .padding(.horizontal, 18)
-                .padding(.vertical, 8)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .stroke(Color.red.opacity(0.85), lineWidth: 1)
-                }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(Array(editor.images.enumerated()), id: \.element.id) { idx, item in
-                        Button {
-                            activeIndex = idx
-                            syncSelectionWithActiveIndex()
-                        } label: {
-                            Image(uiImage: item.current)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 56, height: 56)
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .stroke(activeIndex == idx ? Color.yellow : Color.white.opacity(0.2), lineWidth: 2)
-                                }
-                        }
-                        .buttonStyle(.plain)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(Array(editor.images.enumerated()), id: \.element.id) { idx, item in
+                    Button {
+                        activeIndex = idx
+                        syncSelectionWithActiveIndex()
+                    } label: {
+                        Image(uiImage: item.current)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 56, height: 56)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(activeIndex == idx ? Color.yellow : Color.white.opacity(0.2), lineWidth: 2)
+                            }
                     }
+                    .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 14)
             }
+            .padding(.horizontal, 14)
         }
     }
 
@@ -222,10 +213,10 @@ public struct PhotoEditorView: View {
 
     private var middleActionBar: some View {
         HStack(spacing: 18) {
-            floatingActionIcon("chevron.left.slash.chevron.right") { }
-            floatingActionIcon("doc.on.doc") { }
-            floatingActionIcon("arrow.up.left.and.arrow.down.right") { }
-            floatingActionIcon("rotate.3d") { }
+            floatingActionIcon("wand.and.stars") { applySingleOperation(.autoEnhance) }
+            floatingActionIcon("sun.max") { applySingleOperation(.adjustBrightness(0.08)) }
+            floatingActionIcon("circle.lefthalf.filled") { applySingleOperation(.adjustContrast(0.08)) }
+            floatingActionIcon("sparkles") { showEffectsPanel = true }
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 12)
@@ -237,10 +228,9 @@ public struct PhotoEditorView: View {
             ForEach(EditorTool.allCases) { tool in
                 Button {
                     selectedTool = tool
+                    editor.selectedIndices = [activeIndex]
                     if tool == .effects {
                         showEffectsPanel = true
-                    } else if tool == .adjust {
-                        editor.selectedIndices = [activeIndex]
                     }
                 } label: {
                     VStack(spacing: 6) {
@@ -260,6 +250,36 @@ public struct PhotoEditorView: View {
         .padding(.vertical, 12)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .padding(.horizontal, 16)
+    }
+
+
+    private var toolOptionsBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(options(for: selectedTool), id: \.title) { option in
+                    Button {
+                        option.action()
+                    } label: {
+                        Text(option.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.white.opacity(0.10), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .frame(height: 38)
+        .overlay(alignment: .trailing) {
+            if isApplyingOperation {
+                ProgressView()
+                    .tint(.white)
+                    .padding(.trailing, 20)
+            }
+        }
     }
 
     // MARK: Actions
@@ -282,6 +302,65 @@ public struct PhotoEditorView: View {
                 .frame(width: 30, height: 30)
         }
         .buttonStyle(.plain)
+    }
+
+
+    private func applySingleOperation(_ operation: EditOperation) {
+        guard editor.images.indices.contains(activeIndex), !isApplyingOperation else { return }
+        isApplyingOperation = true
+        editor.selectedIndices = [activeIndex]
+        Task {
+            try? await editor.applyOperation(operation)
+            await MainActor.run { isApplyingOperation = false }
+        }
+    }
+
+    private func applyOperations(_ operations: [EditOperation]) {
+        guard editor.images.indices.contains(activeIndex), !isApplyingOperation else { return }
+        isApplyingOperation = true
+        editor.selectedIndices = [activeIndex]
+        Task {
+            for operation in operations {
+                try? await editor.applyOperation(operation)
+            }
+            await MainActor.run { isApplyingOperation = false }
+        }
+    }
+
+    private func options(for tool: EditorTool) -> [ToolOption] {
+        switch tool {
+        case .crop:
+            return [
+                ToolOption(title: "Auto fit") { applySingleOperation(.autoEnhance) },
+                ToolOption(title: "More contrast") { applySingleOperation(.adjustContrast(0.06)) }
+            ]
+        case .effects:
+            return [
+                ToolOption(title: "Enhance") { applySingleOperation(.autoEnhance) },
+                ToolOption(title: "Vibrant") { applyOperations([.adjustSaturation(0.10), .adjustContrast(0.05)]) },
+                ToolOption(title: "Open panel") { showEffectsPanel = true }
+            ]
+        case .adjust:
+            return [
+                ToolOption(title: "Brightness +") { applySingleOperation(.adjustBrightness(0.08)) },
+                ToolOption(title: "Contrast +") { applySingleOperation(.adjustContrast(0.08)) },
+                ToolOption(title: "Saturation +") { applySingleOperation(.adjustSaturation(0.08)) }
+            ]
+        case .retouch:
+            return [
+                ToolOption(title: "Denoise") { applySingleOperation(.denoise(strength: 0.45)) },
+                ToolOption(title: "Sharpen") { applySingleOperation(.sharpen(intensity: 0.35)) }
+            ]
+        case .more:
+            return [
+                ToolOption(title: "Revert") {
+                    editor.selectedIndices = [activeIndex]
+                    editor.reset()
+                },
+                ToolOption(title: "Save") { saveCurrentEdits() },
+                ToolOption(title: "Export") { exportAll() }
+            ]
+        }
     }
 
     private func syncSelectionWithActiveIndex() {
@@ -346,6 +425,11 @@ private enum EditorTool: String, CaseIterable, Identifiable {
         case .more: return "circle.grid.2x2"
         }
     }
+}
+
+private struct ToolOption {
+    let title: String
+    let action: () -> Void
 }
 
 private struct GridOverlay: View {
