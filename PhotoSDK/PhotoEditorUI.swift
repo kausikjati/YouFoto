@@ -125,19 +125,13 @@ public struct PhotoEditorView: View {
             iconButton(systemName: "chevron.left") { dismiss() }
 
             iconButton(systemName: "arrow.uturn.backward") {
-                editor.selectedIndices = [activeIndex]
-                editor.undo()
-                resetCropInteraction()
+                undoActiveEditStep()
             }
 
             Spacer(minLength: 6)
 
             Button("Revert") {
-                guard !editor.images.isEmpty else { return }
-                editor.selectedIndices = [activeIndex]
-                editor.reset()
-                syncSelectionWithActiveIndex()
-                resetCropInteraction()
+                revertActiveImageToOriginal()
             }
             .foregroundStyle(.white)
             .font(.title3.weight(.semibold))
@@ -234,6 +228,7 @@ public struct PhotoEditorView: View {
                 }
             }
             .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(Color.white.opacity(0.35), lineWidth: 1)
@@ -392,10 +387,7 @@ public struct PhotoEditorView: View {
             ]
         case .more:
             return [
-                ToolOption(title: "Revert") {
-                    editor.selectedIndices = [activeIndex]
-                    editor.reset()
-                },
+                ToolOption(title: "Revert") { revertActiveImageToOriginal() },
                 ToolOption(title: "Save") { saveCurrentEdits() },
                 ToolOption(title: "Export") { exportAll() }
             ]
@@ -468,13 +460,29 @@ public struct PhotoEditorView: View {
         resetCropInteraction()
     }
 
+    private func undoActiveEditStep() {
+        guard editor.images.indices.contains(activeIndex) else { return }
+        editor.selectedIndices = [activeIndex]
+        editor.undo()
+        resetCropInteraction()
+    }
+
+    private func revertActiveImageToOriginal() {
+        guard editor.images.indices.contains(activeIndex) else { return }
+        editor.selectedIndices = [activeIndex]
+        editor.reset()
+        syncSelectionWithActiveIndex()
+        resetCropInteraction()
+    }
+
     private func syncSelectionWithActiveIndex() {
         guard editor.images.indices.contains(activeIndex) else { return }
         editor.selectedIndices = [activeIndex]
     }
 
     private func saveCurrentEdits() {
-        guard !isSaving else { return }
+        guard !isSaving, editor.images.indices.contains(activeIndex) else { return }
+        editor.selectedIndices = [activeIndex]
         isSaving = true
         Task {
             try? await editor.saveToPhotos()
