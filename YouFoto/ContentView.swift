@@ -62,7 +62,6 @@ struct ContentView: View {
                 }
             }
             .animation(.spring(response: 0.34, dampingFraction: 0.76), value: mediaFilter)
-            .animation(.spring(response: 0.3, dampingFraction: 0.82), value: isSelectionMode)
             .onAppear(perform: setupPhotos)
             .onChange(of: mediaFilter) { _, _ in
                 if isSelectionMode {
