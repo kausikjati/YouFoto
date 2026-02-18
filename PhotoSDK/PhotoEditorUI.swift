@@ -482,7 +482,15 @@ public struct PhotoEditorView: View {
 
     private func saveCurrentEdits() {
         guard !isSaving, editor.images.indices.contains(activeIndex) else { return }
-        editor.selectedIndices = [activeIndex]
+
+        let editedIndices = Set(
+            editor.images.enumerated()
+                .filter { $0.element.history.count > 1 }
+                .map(\.offset)
+        )
+
+        editor.selectedIndices = editedIndices.isEmpty ? [activeIndex] : editedIndices
+
         isSaving = true
         Task {
             try? await editor.saveToPhotos()
