@@ -222,32 +222,30 @@ struct ContentView: View {
 
                 Spacer(minLength: 0)
 
-                if !selectedAssetIDs.isEmpty {
-                    selectionIconButton(systemName: "square.and.arrow.up") {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        Task { await presentShareSheet() }
-                    }
-                    .accessibilityLabel("Share")
-
-                    selectionIconButton(systemName: "trash") {
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        Task { await deleteAssets(selectedAssetsInCurrentOrder()) }
-                    }
-                    .accessibilityLabel("Delete selected")
-
-                    selectionIconButton(systemName: editActionIcon) {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        if mediaFilter != .photos {
-                            showEditorUnavailableAlert = true
-                            return
-                        }
-
-                        Task {
-                            await presentPhotoEditor()
-                        }
-                    }
-                    .accessibilityLabel(editActionLabel)
+                selectionIconButton(systemName: "square.and.arrow.up") {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    Task { await presentShareSheet() }
                 }
+                .accessibilityLabel("Share")
+
+                selectionIconButton(systemName: "trash") {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    Task { await deleteAssets(selectedAssetsInCurrentOrder()) }
+                }
+                .accessibilityLabel("Delete selected")
+
+                selectionIconButton(systemName: editActionIcon) {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    if mediaFilter != .photos {
+                        showEditorUnavailableAlert = true
+                        return
+                    }
+
+                    Task {
+                        await presentPhotoEditor()
+                    }
+                }
+                .accessibilityLabel(editActionLabel)
 
                 selectionIconButton(systemName: "xmark") {
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.88)) {
