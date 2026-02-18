@@ -271,13 +271,9 @@ struct ContentView: View {
                 .font(.system(size: 15, weight: .semibold))
 
             Text("\(selectedAssetIDs.count)")
-                .font(.system(size: 17, weight: .bold).monospacedDigit())
+                .font(.system(size: 20, weight: .bold).monospacedDigit())
                 .contentTransition(.numericText())
                 .animation(.spring(response: 0.22, dampingFraction: 0.9), value: selectedAssetIDs.count)
-
-            Text("selected")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 16)
