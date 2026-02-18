@@ -109,6 +109,7 @@ public class PhotoEditorKit: ObservableObject {
     
     /// Process natural language editing command
     public func processCommand(_ command: String) async throws {
+        objectWillChange.send()
         isProcessing = true
         defer { isProcessing = false }
         
@@ -123,6 +124,7 @@ public class PhotoEditorKit: ObservableObject {
             }
         }
         
+        objectWillChange.send()
         onComplete?(results)
     }
     
@@ -132,6 +134,7 @@ public class PhotoEditorKit: ObservableObject {
     
     /// Process batch operations
     public func processBatch(_ job: BatchJob? = nil) async throws {
+        objectWillChange.send()
         isProcessing = true
         defer { isProcessing = false }
         
@@ -151,6 +154,7 @@ public class PhotoEditorKit: ObservableObject {
             }
         }
         
+        objectWillChange.send()
         onComplete?(results)
     }
     
@@ -169,6 +173,7 @@ public class PhotoEditorKit: ObservableObject {
     
     /// AI analyzes and processes each image optimally
     public func smartProcess(targetStyle: String? = nil) async throws {
+        objectWillChange.send()
         isProcessing = true
         defer { isProcessing = false }
         
@@ -215,6 +220,7 @@ public class PhotoEditorKit: ObservableObject {
         }
         
         progress?.completed = targetImages.count
+        objectWillChange.send()
         onComplete?(results)
     }
     
