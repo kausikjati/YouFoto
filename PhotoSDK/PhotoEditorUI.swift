@@ -101,28 +101,45 @@ public struct PhotoEditorView: View {
     // MARK: Main editor
 
     private var editorCanvas: some View {
-        VStack(spacing: 12) {
-            topBar
+        GeometryReader { geometry in
+            let safeTop = geometry.safeAreaInsets.top
+            let safeBottom = geometry.safeAreaInsets.bottom
+            let stageSide = adaptiveStageSide(in: geometry.size, safeTop: safeTop, safeBottom: safeBottom)
 
-            selectedImagesHeader
+            VStack(spacing: 0) {
+                topBar
 
-            imageStage
-                .padding(.horizontal, 14)
+                selectedImagesHeader
+                    .padding(.top, 8)
 
-            middleActionBar
+                Spacer(minLength: 10)
 
-            toolOptionsBar
+                imageStage(side: stageSide)
+                    .padding(.horizontal, 14)
 
-            bottomToolBar
+                Spacer(minLength: 10)
+
+                VStack(spacing: 10) {
+                    middleActionBar
+                    toolOptionsBar
+                    bottomToolBar
+                }
+            }
+            .padding(.top, safeTop + 4)
+            .padding(.bottom, max(10, safeBottom + 4))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .foregroundStyle(.white)
         }
-        .padding(.top, 0)
-        .padding(.bottom, 10)
-        .foregroundStyle(.white)
-        .ignoresSafeArea(edges: .top)
     }
 
-    private var fixedEditorStageSide: CGFloat {
-        min(max(UIScreen.main.bounds.width - 28, 260), 360)
+    private func adaptiveStageSide(in size: CGSize, safeTop: CGFloat, safeBottom: CGFloat) -> CGFloat {
+        let horizontalLimit = min(max(size.width - 28, 260), 420)
+
+        // top bar + selected strip + action bars + spacers + safe-area paddings
+        let reservedHeight: CGFloat = 52 + 64 + 160 + 32 + safeTop + safeBottom
+        let availableHeight = size.height - reservedHeight
+
+        return min(horizontalLimit, max(220, availableHeight))
     }
 
     private var topBar: some View {
@@ -192,9 +209,7 @@ public struct PhotoEditorView: View {
         }
     }
 
-    private var imageStage: some View {
-        let size = fixedEditorStageSide
-
+    private func imageStage(side size: CGFloat) -> some View {
         return ZStack {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color.white.opacity(0.06))
