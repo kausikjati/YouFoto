@@ -259,6 +259,12 @@ public class PhotoEditorKit: ObservableObject {
         images[index].history.append(ProcessingResult(image: image, operations: operations))
     }
 
+    public func rotateImage(at index: Int, degrees: CGFloat) {
+        guard index >= 0, index < images.count else { return }
+        let rotated = images[index].current.rotated(byDegrees: degrees)
+        applyDirectEdit(imageAt: index, image: rotated, operations: [.rotate(degrees)])
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // MARK: - Export
     // ──────────────────────────────────────────────────────────────────────────
@@ -554,6 +560,14 @@ private extension UIImage {
     }
 
     func rotated(byDegrees degrees: CGFloat) -> UIImage {
+        let normalized = Int((degrees.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360))
+
+        if let quarterTurns = [0, 90, 180, 270].first(where: { $0 == normalized }),
+           let cgImage,
+           let orientation = imageOrientation.rotatedClockwise(degrees: quarterTurns) {
+            return UIImage(cgImage: cgImage, scale: scale, orientation: orientation)
+        }
+
         let radians = degrees * .pi / 180
         let newSize = CGRect(origin: .zero, size: size)
             .applying(CGAffineTransform(rotationAngle: radians))
