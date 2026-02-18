@@ -5,6 +5,9 @@ import AVKit
 struct MediaDetailView: View {
     let asset: PHAsset
     let imageManager: PHCachingImageManager
+    let onShare: (PHAsset) -> Void
+    let onEdit: (PHAsset) -> Void
+    let onDelete: (PHAsset) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
@@ -32,6 +35,21 @@ struct MediaDetailView: View {
 
     @Environment(\.displayScale) private var displayScale
     private let screen = UIScreen.main.bounds
+    @State private var fittedContentSize: CGSize = .zero
+
+    init(
+        asset: PHAsset,
+        imageManager: PHCachingImageManager,
+        onShare: @escaping (PHAsset) -> Void = { _ in },
+        onEdit: @escaping (PHAsset) -> Void = { _ in },
+        onDelete: @escaping (PHAsset) -> Void = { _ in }
+    ) {
+        self.asset = asset
+        self.imageManager = imageManager
+        self.onShare = onShare
+        self.onEdit = onEdit
+        self.onDelete = onDelete
+    }
 
     var body: some View {
         ZStack {
@@ -55,8 +73,12 @@ struct MediaDetailView: View {
                     .simultaneousGesture(
                         MagnificationGesture()
                             .onChanged { delta in
-                                zoomScale = (lastZoom * delta).clamped(to: minZoom...maxZoom)
-                                clampPanOffset(animated: false)
+                                var transaction = Transaction(animation: nil)
+                                transaction.disablesAnimations = true
+                                withTransaction(transaction) {
+                                    zoomScale = (lastZoom * delta).clamped(to: minZoom...maxZoom)
+                                    panOffset = clampedOffset(panOffset)
+                                }
                             }
                             .onEnded { delta in
                                 let final = (lastZoom * delta).clamped(to: minZoom...maxZoom)
@@ -76,7 +98,12 @@ struct MediaDetailView: View {
                                 let candidate = CGSize(
                                     width: lastPan.width + v.translation.width,
                                     height: lastPan.height + v.translation.height)
-                                panOffset = clampedOffset(candidate)
+
+                                var transaction = Transaction(animation: nil)
+                                transaction.disablesAnimations = true
+                                withTransaction(transaction) {
+                                    panOffset = clampedOffset(candidate)
+                                }
                             }
                             .onEnded { _ in
                                 guard zoomScale > minZoom else { return }
@@ -134,6 +161,12 @@ struct MediaDetailView: View {
                                     .regular.tint(Color.accentColor.opacity(0.35)),
                                     in: Capsule()
                                 )
+                        }
+
+                        HStack(spacing: 8) {
+                            detailActionButton(systemName: "square.and.arrow.up") { shareAsset() }
+                            detailActionButton(systemName: asset.mediaType == .video ? "film.stack" : "slider.horizontal.3") { editAsset() }
+                            detailActionButton(systemName: "trash") { deleteAsset() }
                         }
                     }
                     .padding(.trailing, 20)
@@ -257,6 +290,10 @@ struct MediaDetailView: View {
     }
 
     private func fittedImageSize() -> CGSize {
+        if fittedContentSize != .zero {
+            return fittedContentSize
+        }
+
         guard let imageSize = fullImage?.size,
               imageSize.width > 0,
               imageSize.height > 0 else {
@@ -295,6 +332,32 @@ struct MediaDetailView: View {
         } else {
             reset()
         }
+    }
+
+    private func detailActionButton(systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: Circle())
+    }
+
+    private func shareAsset() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        onShare(asset)
+    }
+
+    private func editAsset() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        onEdit(asset)
+    }
+
+    private func deleteAsset() {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        onDelete(asset)
     }
 
     private func toggleControls() {
@@ -354,9 +417,22 @@ struct MediaDetailView: View {
             ) { img, info in
                 guard let img else { return }
                 let deg = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                DispatchQueue.main.async { if self.fullImage == nil || !deg { self.fullImage = img } }
+                DispatchQueue.main.async {
+                    if self.fullImage == nil || !deg {
+                        self.fullImage = img
+                        self.fittedContentSize = self.computeFittedSize(for: img.size)
+                    }
+                }
             }
         }
+    }
+
+    private func computeFittedSize(for imageSize: CGSize) -> CGSize {
+        guard imageSize.width > 0, imageSize.height > 0 else { return screen.size }
+        let widthRatio = screen.width / imageSize.width
+        let heightRatio = screen.height / imageSize.height
+        let scale = min(widthRatio, heightRatio)
+        return CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
     }
 
     private func cleanup() {

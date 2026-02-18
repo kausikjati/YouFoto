@@ -26,6 +26,7 @@ struct ContentView: View {
     @State private var isPhotoEditorPresented = false
     @State private var isPreparingPhotoEditor = false
     @State private var showEditorUnavailableAlert = false
+    private let editorTargetMaxDimension: CGFloat = 2048
 
     @Namespace private var filterNS
     @Namespace private var albumNS
@@ -73,7 +74,31 @@ struct ContentView: View {
             .onChange(of: albumFilter) { _, _ in loadAssets() }
         }
         .fullScreenCover(item: $selectedAsset) { asset in
-            MediaDetailView(asset: asset, imageManager: imageManager)
+            MediaDetailView(
+                asset: asset,
+                imageManager: imageManager,
+                onShare: { media in
+                    Task {
+                        await performAfterClosingDetail {
+                            await presentShareSheet(for: media)
+                        }
+                    }
+                },
+                onEdit: { media in
+                    Task {
+                        await performAfterClosingDetail {
+                            await presentPhotoEditor(for: media)
+                        }
+                    }
+                },
+                onDelete: { media in
+                    Task {
+                        await performAfterClosingDetail {
+                            await deleteAssets([media])
+                        }
+                    }
+                }
+            )
         }
         .sheet(isPresented: $isShareSheetPresented) {
             ShareSheet(activityItems: shareItems)
@@ -98,7 +123,16 @@ struct ContentView: View {
                 columnCount: columnCount,
                 isSelectionMode: $isSelectionMode,
                 selectedAssetIDs: $selectedAssetIDs,
-                onTap: { selectedAsset = $0 }
+                onTap: { selectedAsset = $0 },
+                onShare: { asset in
+                    Task { await presentShareSheet(for: asset) }
+                },
+                onEdit: { asset in
+                    Task { await presentPhotoEditor(for: asset) }
+                },
+                onDelete: { asset in
+                    Task { await deleteAssets([asset]) }
+                }
             )
             .gesture(pinchGesture, including: isSelectionMode ? .none : .all)
 
@@ -195,6 +229,12 @@ struct ContentView: View {
                     }
                     .accessibilityLabel("Share")
 
+                    selectionIconButton(systemName: "trash") {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        Task { await deleteAssets(selectedAssetsInCurrentOrder()) }
+                    }
+                    .accessibilityLabel("Delete selected")
+
                     selectionIconButton(systemName: editActionIcon) {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         if mediaFilter != .photos {
@@ -231,13 +271,9 @@ struct ContentView: View {
                 .font(.system(size: 15, weight: .semibold))
 
             Text("\(selectedAssetIDs.count)")
-                .font(.system(size: 17, weight: .bold).monospacedDigit())
+                .font(.system(size: 20, weight: .bold).monospacedDigit())
                 .contentTransition(.numericText())
                 .animation(.spring(response: 0.22, dampingFraction: 0.9), value: selectedAssetIDs.count)
-
-            Text("selected")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 16)
@@ -283,6 +319,23 @@ struct ContentView: View {
         }
     }
 
+    private func performAfterClosingDetail(_ action: @escaping () async -> Void) async {
+        await MainActor.run {
+            selectedAsset = nil
+        }
+
+        try? await Task.sleep(nanoseconds: 320_000_000)
+        await action()
+    }
+
+    private func presentShareSheet(for asset: PHAsset) async {
+        guard let item = await shareItem(for: asset) else { return }
+        await MainActor.run {
+            shareItems = [item]
+            isShareSheetPresented = true
+        }
+    }
+
     private func presentPhotoEditor() async {
         guard !isPreparingPhotoEditor else { return }
         isPreparingPhotoEditor = true
@@ -292,8 +345,10 @@ struct ContentView: View {
         guard !assets.isEmpty else { return }
 
         var selectedImages: [UIImage] = []
+        selectedImages.reserveCapacity(assets.count)
+
         for asset in assets {
-            if let image = await imageForEditing(from: asset) {
+            if let image = await imageForEditing(from: asset, maxDimension: editorTargetMaxDimension) {
                 selectedImages.append(image)
             }
         }
@@ -304,6 +359,43 @@ struct ContentView: View {
             photoEditor.clear()
             photoEditor.loadImages(selectedImages)
             isPhotoEditorPresented = true
+        }
+    }
+
+    private func presentPhotoEditor(for asset: PHAsset) async {
+        guard asset.mediaType == .image else {
+            await MainActor.run { showEditorUnavailableAlert = true }
+            return
+        }
+
+        guard let image = await imageForEditing(from: asset, maxDimension: editorTargetMaxDimension) else { return }
+        await MainActor.run {
+            photoEditor.clear()
+            photoEditor.loadImages([image])
+            isPhotoEditorPresented = true
+        }
+    }
+
+    private func deleteAssets(_ assets: [PHAsset]) async {
+        guard !assets.isEmpty else { return }
+
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.deleteAssets(assets as NSArray)
+            }
+
+            await MainActor.run {
+                let deletedIDs = Set(assets.map(\.localIdentifier))
+                withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+                    selectedAssetIDs.subtract(deletedIDs)
+                    if let selectedAsset, deletedIDs.contains(selectedAsset.localIdentifier) {
+                        self.selectedAsset = nil
+                    }
+                    loadAssets()
+                }
+            }
+        } catch {
+            // Intentionally ignored for now; Photos framework handles permission errors.
         }
     }
 
@@ -353,19 +445,31 @@ struct ContentView: View {
         }
     }
 
-    private func imageForEditing(from asset: PHAsset) async -> UIImage? {
+    private func imageForEditing(from asset: PHAsset, maxDimension: CGFloat) async -> UIImage? {
         await withCheckedContinuation { continuation in
             let options = PHImageRequestOptions()
             options.deliveryMode = .highQualityFormat
-            options.resizeMode = .none
+            options.resizeMode = .exact
             options.isNetworkAccessAllowed = true
 
-            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, _ in
-                guard let data, let image = UIImage(data: data) else {
+            let targetSize = CGSize(width: maxDimension, height: maxDimension)
+            PHImageManager.default().requestImage(
+                for: asset,
+                targetSize: targetSize,
+                contentMode: .aspectFit,
+                options: options
+            ) { image, info in
+                if let cancelled = info?[PHImageCancelledKey] as? Bool, cancelled {
                     continuation.resume(returning: nil)
                     return
                 }
-                continuation.resume(returning: image)
+
+                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if let image, !isDegraded {
+                    continuation.resume(returning: image)
+                } else if !isDegraded {
+                    continuation.resume(returning: nil)
+                }
             }
         }
     }

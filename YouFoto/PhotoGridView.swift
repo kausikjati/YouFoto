@@ -9,6 +9,9 @@ struct PhotoGridView: View {
     @Binding var isSelectionMode: Bool
     @Binding var selectedAssetIDs: Set<String>
     let onTap: (PHAsset) -> Void
+    let onShare: (PHAsset) -> Void
+    let onEdit: (PHAsset) -> Void
+    let onDelete: (PHAsset) -> Void
 
     private let gap: CGFloat = 3
     @State private var scrollContentMinY: CGFloat = 0
@@ -55,6 +58,9 @@ struct PhotoGridView: View {
                                         isSelectionMode: isSelectionMode,
                                         isSelected: selectedAssetIDs.contains(fetchResult.object(at: i).localIdentifier),
                                         onTap: onTap,
+                                        onShare: onShare,
+                                        onEdit: onEdit,
+                                        onDelete: onDelete,
                                         onSelectToggle: { toggleSelection(at: i) }
                                     )
                                     .id(i)
@@ -62,6 +68,7 @@ struct PhotoGridView: View {
                             }
                         }
                         .animation(.spring(response: 0.28, dampingFraction: 0.82), value: columnCount)
+                        .animation(.easeInOut(duration: 0.2), value: fetchResult.count)
                     }
                 }
                 .coordinateSpace(name: "gridScroll")
@@ -218,6 +225,9 @@ private struct GridCell: View {
     let isSelectionMode: Bool
     let isSelected: Bool
     let onTap: (PHAsset) -> Void
+    let onShare: (PHAsset) -> Void
+    let onEdit: (PHAsset) -> Void
+    let onDelete: (PHAsset) -> Void
     let onSelectToggle: () -> Void
 
     @State private var image: UIImage? = nil
@@ -268,13 +278,22 @@ private struct GridCell: View {
         .onDisappear(perform: cancelImageRequest)
         .contextMenu {
             Button {
-                onTap(asset)
+                onShare(asset)
             } label: {
-                Label("Open", systemImage: "arrow.up.forward.app")
+                Label("Share", systemImage: "square.and.arrow.up")
             }
 
-            Label(asset.mediaType == .video ? "Video" : "Photo",
-                  systemImage: asset.mediaType == .video ? "video" : "photo")
+            Button {
+                onEdit(asset)
+            } label: {
+                Label("Edit", systemImage: asset.mediaType == .video ? "film.stack" : "slider.horizontal.3")
+            }
+
+            Button(role: .destructive) {
+                onDelete(asset)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
         } preview: {
             GridCellContextPreview(asset: asset, imageManager: imageManager, thumbnail: image)
         }
