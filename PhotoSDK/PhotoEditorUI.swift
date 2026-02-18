@@ -120,6 +120,10 @@ public struct PhotoEditorView: View {
         .foregroundStyle(.white)
     }
 
+    private var fixedEditorStageSide: CGFloat {
+        min(max(UIScreen.main.bounds.width - 28, 260), 360)
+    }
+
     private var topBar: some View {
         HStack(spacing: 14) {
             iconButton(systemName: "chevron.left") { dismiss() }
@@ -187,57 +191,53 @@ public struct PhotoEditorView: View {
     }
 
     private var imageStage: some View {
-        GeometryReader { geo in
-            let size = min(geo.size.width, geo.size.height)
+        let size = fixedEditorStageSide
 
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
+        return ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.06))
 
-                if let image = editor.images[safe: activeIndex]?.current {
-                    let imageView = Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: size - 8, height: size - 8)
-                        .scaleEffect(selectedTool == .crop ? cropScale : 1)
-                        .offset(selectedTool == .crop ? cropOffset : .zero)
-                        .animation(.easeOut(duration: 0.15), value: cropScale)
-                        .animation(.easeOut(duration: 0.15), value: cropOffset)
-
-                    if selectedTool == .crop {
-                        imageView.gesture(cropGesture(for: size - 8))
-                    } else {
-                        imageView
-                    }
-                }
-
-                GridOverlay(lineColor: .black.opacity(0.22), columns: 3, rows: 3)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            if let image = editor.images[safe: activeIndex]?.current {
+                let imageView = Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: size - 8, height: size - 8)
+                    .scaleEffect(selectedTool == .crop ? cropScale : 1)
+                    .offset(selectedTool == .crop ? cropOffset : .zero)
+                    .animation(.easeOut(duration: 0.15), value: cropScale)
+                    .animation(.easeOut(duration: 0.15), value: cropOffset)
 
                 if selectedTool == .crop {
-                    VStack {
-                        Text("Pinch and drag to crop")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(.black.opacity(0.35), in: Capsule())
-                        Spacer()
-                    }
-                    .padding(.top, 10)
+                    imageView.gesture(cropGesture(for: size - 8))
+                } else {
+                    imageView
                 }
             }
-            .frame(width: size, height: size)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.white.opacity(0.35), lineWidth: 1)
+
+            GridOverlay(lineColor: .black.opacity(0.22), columns: 3, rows: 3)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            if selectedTool == .crop {
+                VStack {
+                    Text("Pinch and drag to crop")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.35), in: Capsule())
+                    Spacer()
+                }
+                .padding(.top, 10)
             }
-            .onAppear { stageSize = size }
-            .onChange(of: size) { _, newSize in stageSize = newSize }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxHeight: 470)
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.35), lineWidth: 1)
+        }
+        .onAppear { stageSize = size }
+        .frame(maxWidth: .infinity)
     }
 
     private var middleActionBar: some View {
