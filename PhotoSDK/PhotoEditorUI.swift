@@ -321,45 +321,68 @@ public struct PhotoEditorView: View {
     }
 
     private var adjustLightControls: some View {
-        HStack(spacing: 10) {
-            lightControlRow(title: "Brightness", decrement: .adjustBrightness(-0.08), increment: .adjustBrightness(0.08))
-            lightControlRow(title: "Contrast", decrement: .adjustContrast(-0.08), increment: .adjustContrast(0.08))
-            lightControlRow(title: "Saturation", decrement: .adjustSaturation(-0.08), increment: .adjustSaturation(0.08))
+        VStack(spacing: 10) {
+            lightControlRow(
+                title: "Brightness",
+                subtitle: "Exposure and highlights",
+                decrement: .adjustBrightness(-0.08),
+                increment: .adjustBrightness(0.08)
+            )
+
+            lightControlRow(
+                title: "Contrast",
+                subtitle: "Darks and lights separation",
+                decrement: .adjustContrast(-0.08),
+                increment: .adjustContrast(0.08)
+            )
+
+            lightControlRow(
+                title: "Saturation",
+                subtitle: "Color intensity",
+                decrement: .adjustSaturation(-0.08),
+                increment: .adjustSaturation(0.08)
+            )
         }
         .padding(.horizontal, 14)
     }
 
-    private func lightControlRow(title: String, decrement: EditOperation, increment: EditOperation) -> some View {
-        HStack(spacing: 6) {
-            Text(title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.82))
-
-            Button {
-                applySingleOperation(decrement)
-            } label: {
-                Image(systemName: "minus")
-                    .font(.system(size: 11, weight: .bold))
-                    .frame(width: 24, height: 24)
+    private func lightControlRow(
+        title: String,
+        subtitle: String,
+        decrement: EditOperation,
+        increment: EditOperation
+    ) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.65))
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white)
-            .background(.white.opacity(0.13), in: Circle())
 
-            Button {
-                applySingleOperation(increment)
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 11, weight: .bold))
-                    .frame(width: 24, height: 24)
+            Spacer(minLength: 0)
+
+            HStack(spacing: 8) {
+                lightStepButton(systemName: "minus", action: { applySingleOperation(decrement) })
+                lightStepButton(systemName: "plus", action: { applySingleOperation(increment) })
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white)
-            .background(.white.opacity(0.13), in: Circle())
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 8)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func lightStepButton(systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .bold))
+                .frame(width: 30, height: 30)
+                .background(.white.opacity(0.16), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
     }
 
     // MARK: Actions
