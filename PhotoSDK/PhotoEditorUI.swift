@@ -104,7 +104,11 @@ public struct PhotoEditorView: View {
         GeometryReader { geometry in
             let safeTop = geometry.safeAreaInsets.top
             let safeBottom = geometry.safeAreaInsets.bottom
-            let stageSide = adaptiveStageSide(in: geometry.size)
+            let safeLeading = geometry.safeAreaInsets.leading
+            let safeTrailing = geometry.safeAreaInsets.trailing
+            let contentLeading = safeLeading + 14
+            let contentTrailing = safeTrailing + 14
+            let stageSide = adaptiveStageSide(in: geometry.size, horizontalPadding: contentLeading + contentTrailing)
 
             VStack(spacing: 10) {
                 topBar
@@ -112,7 +116,6 @@ public struct PhotoEditorView: View {
                 selectedImagesHeader
 
                 imageStage(side: stageSide)
-                    .padding(.horizontal, 14)
 
                 Spacer(minLength: 0)
 
@@ -122,15 +125,17 @@ public struct PhotoEditorView: View {
                     bottomToolBar
                 }
             }
+            .padding(.leading, contentLeading)
+            .padding(.trailing, contentTrailing)
             .padding(.top, max(4, safeTop == 0 ? 4 : 0))
             .padding(.bottom, max(8, safeBottom))
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
             .foregroundStyle(.white)
         }
     }
 
-    private func adaptiveStageSide(in size: CGSize) -> CGFloat {
-        let horizontalLimit = min(max(size.width - 28, 260), 420)
+    private func adaptiveStageSide(in size: CGSize, horizontalPadding: CGFloat) -> CGFloat {
+        let horizontalLimit = min(max(size.width - horizontalPadding, 260), 420)
 
         // top bar + thumbnail strip + action/tool bars + spacing
         let reservedHeight: CGFloat = 58 + 64 + 178
@@ -177,7 +182,7 @@ public struct PhotoEditorView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 2)
         .padding(.top, 6)
     }
 
@@ -202,7 +207,7 @@ public struct PhotoEditorView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 2)
         }
     }
 
@@ -295,7 +300,7 @@ public struct PhotoEditorView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 2)
     }
 
 
@@ -316,7 +321,7 @@ public struct PhotoEditorView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 2)
         }
         .frame(height: 38)
         .overlay(alignment: .trailing) {
