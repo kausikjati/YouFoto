@@ -347,24 +347,17 @@ struct MediaDetailView: View {
 
     private func shareAsset() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        dismissThenPerform { onShare(asset) }
+        onShare(asset)
     }
 
     private func editAsset() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        dismissThenPerform { onEdit(asset) }
+        onEdit(asset)
     }
 
     private func deleteAsset() {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        dismissThenPerform { onDelete(asset) }
-    }
-
-    private func dismissThenPerform(_ action: @escaping () -> Void) {
-        dismiss()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            action()
-        }
+        onDelete(asset)
     }
 
     private func toggleControls() {
