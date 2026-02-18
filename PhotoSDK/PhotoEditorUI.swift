@@ -101,7 +101,7 @@ public struct PhotoEditorView: View {
     // MARK: Main editor
 
     private var editorCanvas: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             topBar
 
             selectedImagesHeader
@@ -115,9 +115,10 @@ public struct PhotoEditorView: View {
 
             bottomToolBar
         }
-        .padding(.top, 8)
+        .padding(.top, 0)
         .padding(.bottom, 10)
         .foregroundStyle(.white)
+        .ignoresSafeArea(edges: .top)
     }
 
     private var fixedEditorStageSide: CGFloat {
@@ -163,6 +164,7 @@ public struct PhotoEditorView: View {
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
+        .padding(.top, 6)
     }
 
     private var selectedImagesHeader: some View {
