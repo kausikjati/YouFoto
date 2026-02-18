@@ -66,12 +66,13 @@ public class PhotoEditorKit: ObservableObject {
     
     /// Add a single image to the editor
     public func addImage(_ image: UIImage, metadata: ImageMetadata? = nil) {
-        let editable = EditableImage(
+        var editable = EditableImage(
             id: UUID(),
             original: image,
             current: image,
             metadata: metadata ?? .default
         )
+        editable.history = [ProcessingResult(image: image)]
         images.append(editable)
     }
     
@@ -239,10 +240,16 @@ public class PhotoEditorKit: ObservableObject {
         for index in selectedIndices {
             guard index < images.count else { continue }
             images[index].current = images[index].original
-            images[index].history.removeAll()
+            images[index].history = [ProcessingResult(image: images[index].original)]
         }
     }
     
+    public func applyDirectEdit(imageAt index: Int, image: UIImage, operations: [EditOperation] = []) {
+        guard index >= 0, index < images.count else { return }
+        images[index].current = image
+        images[index].history.append(ProcessingResult(image: image, operations: operations))
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // MARK: - Export
     // ──────────────────────────────────────────────────────────────────────────

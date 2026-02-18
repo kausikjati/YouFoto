@@ -17,6 +17,11 @@ public struct PhotoEditorView: View {
     @State private var showEffectsPanel = false
     @State private var isSaving = false
     @State private var isApplyingOperation = false
+    @State private var cropScale: CGFloat = 1
+    @State private var cropOffset: CGSize = .zero
+    @State private var lastCropOffset: CGSize = .zero
+    @State private var baseCropScale: CGFloat = 1
+    @State private var stageSize: CGFloat = 0
 
     public init(editor: PhotoEditorKit) {
         self.editor = editor
@@ -43,6 +48,7 @@ public struct PhotoEditorView: View {
         .onChange(of: editor.images.count) { _, count in
             activeIndex = min(activeIndex, max(0, count - 1))
             syncSelectionWithActiveIndex()
+            resetCropInteraction()
         }
         .task(id: editor.images.count) {
             if !editor.images.isEmpty {
@@ -119,7 +125,9 @@ public struct PhotoEditorView: View {
             iconButton(systemName: "chevron.left") { dismiss() }
 
             iconButton(systemName: "arrow.uturn.backward") {
+                editor.selectedIndices = [activeIndex]
                 editor.undo()
+                resetCropInteraction()
             }
 
             Spacer(minLength: 6)
@@ -129,6 +137,7 @@ public struct PhotoEditorView: View {
                 editor.selectedIndices = [activeIndex]
                 editor.reset()
                 syncSelectionWithActiveIndex()
+                resetCropInteraction()
             }
             .foregroundStyle(.white)
             .font(.title3.weight(.semibold))
@@ -192,20 +201,45 @@ public struct PhotoEditorView: View {
                     .fill(Color.white.opacity(0.06))
 
                 if let image = editor.images[safe: activeIndex]?.current {
-                    Image(uiImage: image)
+                    let imageView = Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
                         .frame(width: size - 8, height: size - 8)
+                        .scaleEffect(selectedTool == .crop ? cropScale : 1)
+                        .offset(selectedTool == .crop ? cropOffset : .zero)
+                        .animation(.easeOut(duration: 0.15), value: cropScale)
+                        .animation(.easeOut(duration: 0.15), value: cropOffset)
+
+                    if selectedTool == .crop {
+                        imageView.gesture(cropGesture(for: size - 8))
+                    } else {
+                        imageView
+                    }
                 }
 
                 GridOverlay(lineColor: .black.opacity(0.22), columns: 3, rows: 3)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                if selectedTool == .crop {
+                    VStack {
+                        Text("Pinch and drag to crop")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(.black.opacity(0.35), in: Capsule())
+                        Spacer()
+                    }
+                    .padding(.top, 10)
+                }
             }
             .frame(width: size, height: size)
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(Color.white.opacity(0.35), lineWidth: 1)
             }
+            .onAppear { stageSize = size }
+            .onChange(of: size) { _, newSize in stageSize = newSize }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxHeight: 470)
@@ -229,6 +263,9 @@ public struct PhotoEditorView: View {
                 Button {
                     selectedTool = tool
                     editor.selectedIndices = [activeIndex]
+                    if tool == .crop {
+                        resetCropInteraction()
+                    }
                     if tool == .effects {
                         showEffectsPanel = true
                     }
@@ -331,8 +368,10 @@ public struct PhotoEditorView: View {
         switch tool {
         case .crop:
             return [
-                ToolOption(title: "Auto fit") { applySingleOperation(.autoEnhance) },
-                ToolOption(title: "More contrast") { applySingleOperation(.adjustContrast(0.06)) }
+                ToolOption(title: "Zoom +") { cropScale = min(cropScale + 0.2, 4); baseCropScale = cropScale },
+                ToolOption(title: "Zoom -") { cropScale = max(cropScale - 0.2, 1); baseCropScale = cropScale },
+                ToolOption(title: "Reset") { resetCropInteraction() },
+                ToolOption(title: "Apply Crop") { applyCropToActiveImage() }
             ]
         case .effects:
             return [
@@ -361,6 +400,72 @@ public struct PhotoEditorView: View {
                 ToolOption(title: "Export") { exportAll() }
             ]
         }
+    }
+
+    private func cropGesture(for stageSide: CGFloat) -> some Gesture {
+        SimultaneousGesture(
+            MagnificationGesture()
+                .onChanged { value in
+                    cropScale = min(max(baseCropScale * value, 1), 4)
+                    cropOffset = clampedOffset(cropOffset, stageSide: stageSide, scale: cropScale)
+                }
+                .onEnded { _ in
+                    baseCropScale = cropScale
+                    cropOffset = clampedOffset(cropOffset, stageSide: stageSide, scale: cropScale)
+                },
+            DragGesture()
+                .onChanged { value in
+                    let proposed = CGSize(
+                        width: lastCropOffset.width + value.translation.width,
+                        height: lastCropOffset.height + value.translation.height
+                    )
+                    cropOffset = clampedOffset(proposed, stageSide: stageSide, scale: cropScale)
+                }
+                .onEnded { _ in
+                    lastCropOffset = cropOffset
+                }
+        )
+    }
+
+    private func clampedOffset(_ offset: CGSize, stageSide: CGFloat, scale: CGFloat) -> CGSize {
+        let overflow = max((stageSide * scale - stageSide) / 2, 0)
+        return CGSize(
+            width: min(max(offset.width, -overflow), overflow),
+            height: min(max(offset.height, -overflow), overflow)
+        )
+    }
+
+    private func resetCropInteraction() {
+        cropScale = 1
+        baseCropScale = 1
+        cropOffset = .zero
+        lastCropOffset = .zero
+    }
+
+    private func applyCropToActiveImage() {
+        guard editor.images.indices.contains(activeIndex),
+              let image = editor.images[safe: activeIndex]?.current,
+              stageSize > 0 else { return }
+
+        let side = stageSize - 8
+        let sourceSize = image.size
+        let fitScale = min(side / sourceSize.width, side / sourceSize.height)
+        let drawSize = CGSize(width: sourceSize.width * fitScale * cropScale,
+                              height: sourceSize.height * fitScale * cropScale)
+        let drawOrigin = CGPoint(
+            x: (side - drawSize.width) / 2 + cropOffset.width,
+            y: (side - drawSize.height) / 2 + cropOffset.height
+        )
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = image.scale
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format)
+        let cropped = renderer.image { _ in
+            image.draw(in: CGRect(origin: drawOrigin, size: drawSize))
+        }
+
+        editor.applyDirectEdit(imageAt: activeIndex, image: cropped)
+        resetCropInteraction()
     }
 
     private func syncSelectionWithActiveIndex() {
