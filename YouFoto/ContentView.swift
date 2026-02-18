@@ -77,13 +77,25 @@ struct ContentView: View {
                 asset: asset,
                 imageManager: imageManager,
                 onShare: { media in
-                    Task { await presentShareSheet(for: media) }
+                    Task {
+                        await performAfterClosingDetail {
+                            await presentShareSheet(for: media)
+                        }
+                    }
                 },
                 onEdit: { media in
-                    Task { await presentPhotoEditor(for: media) }
+                    Task {
+                        await performAfterClosingDetail {
+                            await presentPhotoEditor(for: media)
+                        }
+                    }
                 },
                 onDelete: { media in
-                    Task { await deleteAssets([media]) }
+                    Task {
+                        await performAfterClosingDetail {
+                            await deleteAssets([media])
+                        }
+                    }
                 }
             )
         }
@@ -302,6 +314,15 @@ struct ContentView: View {
             shareItems = resolvedItems
             isShareSheetPresented = true
         }
+    }
+
+    private func performAfterClosingDetail(_ action: @escaping () async -> Void) async {
+        await MainActor.run {
+            selectedAsset = nil
+        }
+
+        try? await Task.sleep(nanoseconds: 320_000_000)
+        await action()
     }
 
     private func presentShareSheet(for asset: PHAsset) async {
