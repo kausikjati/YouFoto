@@ -224,6 +224,7 @@ public class PhotoEditorKit: ObservableObject {
     
     /// Undo last edit on selected images
     public func undo() {
+        objectWillChange.send()
         for index in selectedIndices {
             guard index < images.count else { continue }
             if images[index].history.count > 1 {
@@ -237,6 +238,7 @@ public class PhotoEditorKit: ObservableObject {
     
     /// Reset selected images to original
     public func reset() {
+        objectWillChange.send()
         for index in selectedIndices {
             guard index < images.count else { continue }
             images[index].current = images[index].original
@@ -245,6 +247,7 @@ public class PhotoEditorKit: ObservableObject {
     }
     
     public func applyDirectEdit(imageAt index: Int, image: UIImage, operations: [EditOperation] = []) {
+        objectWillChange.send()
         guard index >= 0, index < images.count else { return }
         images[index].current = image
         images[index].history.append(ProcessingResult(image: image, operations: operations))
