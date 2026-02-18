@@ -377,8 +377,11 @@ public struct PhotoEditorView: View {
         case .adjust:
             return [
                 ToolOption(title: "Brightness +") { applySingleOperation(.adjustBrightness(0.08)) },
+                ToolOption(title: "Brightness -") { applySingleOperation(.adjustBrightness(-0.08)) },
                 ToolOption(title: "Contrast +") { applySingleOperation(.adjustContrast(0.08)) },
-                ToolOption(title: "Saturation +") { applySingleOperation(.adjustSaturation(0.08)) }
+                ToolOption(title: "Contrast -") { applySingleOperation(.adjustContrast(-0.08)) },
+                ToolOption(title: "Saturation +") { applySingleOperation(.adjustSaturation(0.08)) },
+                ToolOption(title: "Saturation -") { applySingleOperation(.adjustSaturation(-0.08)) }
             ]
         case .retouch:
             return [
