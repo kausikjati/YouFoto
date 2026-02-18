@@ -229,6 +229,12 @@ struct ContentView: View {
                     }
                     .accessibilityLabel("Share")
 
+                    selectionIconButton(systemName: "trash") {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        Task { await deleteAssets(selectedAssetsInCurrentOrder()) }
+                    }
+                    .accessibilityLabel("Delete selected")
+
                     selectionIconButton(systemName: editActionIcon) {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         if mediaFilter != .photos {
