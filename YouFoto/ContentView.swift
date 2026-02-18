@@ -457,22 +457,9 @@ struct ContentView: View {
 
 private struct PhotoEditorSessionView: View {
     @ObservedObject var editor: PhotoEditorKit
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         PhotoEditorView(editor: editor)
-            .overlay(alignment: .topLeading) {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 14, weight: .bold))
-                        .frame(width: 34, height: 34)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-            }
     }
 }
 
