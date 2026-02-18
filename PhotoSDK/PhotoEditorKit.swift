@@ -330,6 +330,7 @@ public enum EditOperation {
     case adjustBrightness(CGFloat)
     case adjustContrast(CGFloat)
     case adjustSaturation(CGFloat)
+    case rotate(CGFloat)
     case sharpen(intensity: CGFloat)
     case denoise(strength: CGFloat)
     case autoEnhance
@@ -368,6 +369,7 @@ public final class EditorAgent {
         if lowered.contains("sharpen") { operations.append(.sharpen(intensity: 0.5)) }
         if lowered.contains("denoise") || lowered.contains("noise") { operations.append(.denoise(strength: 0.5)) }
         if lowered.contains("background") { operations.append(.removeBackground) }
+        if lowered.contains("rotate") { operations.append(.rotate(90)) }
 
         if operations.isEmpty {
             operations = [.autoEnhance]
@@ -439,6 +441,8 @@ public final class BatchProcessor {
                 output = output.adjusted(brightness: 0, contrast: 1 + value, saturation: 1)
             case .adjustSaturation(let value):
                 output = output.adjusted(brightness: 0, contrast: 1, saturation: 1 + value)
+            case .rotate(let degrees):
+                output = output.rotated(byDegrees: degrees)
             case .sharpen(let intensity):
                 output = output.sharpened(intensity: intensity)
             case .denoise(let strength):
@@ -522,14 +526,14 @@ private extension UIImage {
         filter.setValue(brightness, forKey: kCIInputBrightnessKey)
         filter.setValue(contrast, forKey: kCIInputContrastKey)
         filter.setValue(saturation, forKey: kCIInputSaturationKey)
-        return Self.render(filter.outputImage) ?? self
+        return Self.render(filter.outputImage, source: self) ?? self
     }
 
     func sharpened(intensity: CGFloat) -> UIImage {
         guard let ci = CIImage(image: self), let filter = CIFilter(name: "CISharpenLuminance") else { return self }
         filter.setValue(ci, forKey: kCIInputImageKey)
         filter.setValue(max(0, intensity * 2), forKey: kCIInputSharpnessKey)
-        return Self.render(filter.outputImage) ?? self
+        return Self.render(filter.outputImage, source: self) ?? self
     }
 
     func noiseReduced(strength: CGFloat) -> UIImage {
@@ -537,7 +541,7 @@ private extension UIImage {
         filter.setValue(ci, forKey: kCIInputImageKey)
         filter.setValue(max(0, min(0.1, strength * 0.1)), forKey: "inputNoiseLevel")
         filter.setValue(0.4, forKey: kCIInputSharpnessKey)
-        return Self.render(filter.outputImage) ?? self
+        return Self.render(filter.outputImage, source: self) ?? self
     }
 
     func autoEnhanced() -> UIImage {
@@ -546,14 +550,28 @@ private extension UIImage {
             filter.setValue(current, forKey: kCIInputImageKey)
             return filter.outputImage ?? current
         }
-        return Self.render(adjusted) ?? self
+        return Self.render(adjusted, source: self) ?? self
     }
 
-    private static func render(_ ciImage: CIImage?) -> UIImage? {
+    func rotated(byDegrees degrees: CGFloat) -> UIImage {
+        let radians = degrees * .pi / 180
+        let newSize = CGRect(origin: .zero, size: size)
+            .applying(CGAffineTransform(rotationAngle: radians))
+            .integral.size
+
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { context in
+            context.cgContext.translateBy(x: newSize.width / 2, y: newSize.height / 2)
+            context.cgContext.rotate(by: radians)
+            draw(in: CGRect(x: -size.width / 2, y: -size.height / 2, width: size.width, height: size.height))
+        }
+    }
+
+    private static func render(_ ciImage: CIImage?, source: UIImage) -> UIImage? {
         guard let ciImage else { return nil }
         let context = CIContext(options: nil)
         guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else { return nil }
-        return UIImage(cgImage: cgImage)
+        return UIImage(cgImage: cgImage, scale: source.scale, orientation: source.imageOrientation)
     }
 }
 

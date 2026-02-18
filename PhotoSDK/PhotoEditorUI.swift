@@ -244,7 +244,7 @@ public struct PhotoEditorView: View {
         HStack(spacing: 18) {
             floatingActionIcon("wand.and.stars") { applySingleOperation(.autoEnhance) }
             floatingActionIcon("sun.max") { applySingleOperation(.adjustBrightness(0.08)) }
-            floatingActionIcon("circle.lefthalf.filled") { applySingleOperation(.adjustContrast(0.08)) }
+            floatingActionIcon("rotate.right") { applySingleOperation(.rotate(90)) }
             floatingActionIcon("sparkles") { showEffectsPanel = true }
         }
         .padding(.horizontal, 22)
@@ -365,6 +365,8 @@ public struct PhotoEditorView: View {
             return [
                 ToolOption(title: "Zoom +") { cropScale = min(cropScale + 0.2, 4); baseCropScale = cropScale },
                 ToolOption(title: "Zoom -") { cropScale = max(cropScale - 0.2, 1); baseCropScale = cropScale },
+                ToolOption(title: "Rotate Left") { applySingleOperation(.rotate(-90)) },
+                ToolOption(title: "Rotate Right") { applySingleOperation(.rotate(90)) },
                 ToolOption(title: "Reset") { resetCropInteraction() },
                 ToolOption(title: "Apply Crop") { applyCropToActiveImage() }
             ]
