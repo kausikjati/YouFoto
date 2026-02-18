@@ -106,14 +106,15 @@ public struct PhotoEditorView: View {
             let safeBottom = geometry.safeAreaInsets.bottom
             let stageSide = adaptiveStageSide(in: geometry.size, safeTop: safeTop, safeBottom: safeBottom)
 
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 topBar
 
                 selectedImagesHeader
 
                 imageStage(side: stageSide)
                     .padding(.horizontal, 14)
-                    .frame(maxHeight: .infinity, alignment: .center)
+
+                Spacer(minLength: 0)
 
                 VStack(spacing: 10) {
                     middleActionBar
@@ -121,22 +122,21 @@ public struct PhotoEditorView: View {
                     bottomToolBar
                 }
             }
-            .padding(.top, safeTop + 2)
-            .padding(.bottom, max(8, safeBottom + 2))
+            .padding(.top, safeTop + 4)
+            .padding(.bottom, max(8, safeBottom + 4))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .foregroundStyle(.white)
         }
-        .ignoresSafeArea(edges: .top)
     }
 
     private func adaptiveStageSide(in size: CGSize, safeTop: CGFloat, safeBottom: CGFloat) -> CGFloat {
         let horizontalLimit = min(max(size.width - 28, 260), 420)
 
-        // top bar + thumbnail strip + bars + paddings
-        let reservedHeight: CGFloat = 50 + 64 + 180 + safeTop + safeBottom
+        // top bar + thumbnail strip + action/tool bars + safe-area paddings
+        let reservedHeight: CGFloat = 58 + 64 + 178 + safeTop + safeBottom
         let availableHeight = size.height - reservedHeight
 
-        return min(horizontalLimit, max(240, availableHeight))
+        return min(horizontalLimit, max(220, availableHeight))
     }
 
     private var topBar: some View {
