@@ -62,6 +62,7 @@ struct ContentView: View {
                 }
             }
             .animation(.spring(response: 0.34, dampingFraction: 0.76), value: mediaFilter)
+            .animation(.spring(response: 0.3, dampingFraction: 0.82), value: isSelectionMode)
             .onAppear(perform: setupPhotos)
             .onChange(of: mediaFilter) { _, _ in
                 if isSelectionMode {
@@ -221,30 +222,32 @@ struct ContentView: View {
 
                 Spacer(minLength: 0)
 
-                selectionIconButton(systemName: "square.and.arrow.up") {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    Task { await presentShareSheet() }
-                }
-                .accessibilityLabel("Share")
-
-                selectionIconButton(systemName: "trash") {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    Task { await deleteAssets(selectedAssetsInCurrentOrder()) }
-                }
-                .accessibilityLabel("Delete selected")
-
-                selectionIconButton(systemName: editActionIcon) {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    if mediaFilter != .photos {
-                        showEditorUnavailableAlert = true
-                        return
+                if !selectedAssetIDs.isEmpty {
+                    selectionIconButton(systemName: "square.and.arrow.up") {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        Task { await presentShareSheet() }
                     }
+                    .accessibilityLabel("Share")
 
-                    Task {
-                        await presentPhotoEditor()
+                    selectionIconButton(systemName: "trash") {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        Task { await deleteAssets(selectedAssetsInCurrentOrder()) }
                     }
+                    .accessibilityLabel("Delete selected")
+
+                    selectionIconButton(systemName: editActionIcon) {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        if mediaFilter != .photos {
+                            showEditorUnavailableAlert = true
+                            return
+                        }
+
+                        Task {
+                            await presentPhotoEditor()
+                        }
+                    }
+                    .accessibilityLabel(editActionLabel)
                 }
-                .accessibilityLabel(editActionLabel)
 
                 selectionIconButton(systemName: "xmark") {
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.88)) {
@@ -271,20 +274,14 @@ struct ContentView: View {
                 .font(.system(size: 17, weight: .bold).monospacedDigit())
                 .contentTransition(.numericText())
                 .animation(.spring(response: 0.22, dampingFraction: 0.9), value: selectedAssetIDs.count)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
 
             Text("selected")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .frame(minWidth: 140, alignment: .leading)
-        .layoutPriority(1)
         .glassEffect(.regular, in: Capsule())
     }
 
