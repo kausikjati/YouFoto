@@ -68,6 +68,7 @@ struct PhotoGridView: View {
                             }
                         }
                         .animation(.spring(response: 0.28, dampingFraction: 0.82), value: columnCount)
+                        .animation(.easeInOut(duration: 0.2), value: fetchResult.count)
                     }
                 }
                 .coordinateSpace(name: "gridScroll")

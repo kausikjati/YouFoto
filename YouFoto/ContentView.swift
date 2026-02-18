@@ -360,11 +360,13 @@ struct ContentView: View {
 
             await MainActor.run {
                 let deletedIDs = Set(assets.map(\.localIdentifier))
-                selectedAssetIDs.subtract(deletedIDs)
-                if let selectedAsset, deletedIDs.contains(selectedAsset.localIdentifier) {
-                    self.selectedAsset = nil
+                withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+                    selectedAssetIDs.subtract(deletedIDs)
+                    if let selectedAsset, deletedIDs.contains(selectedAsset.localIdentifier) {
+                        self.selectedAsset = nil
+                    }
+                    loadAssets()
                 }
-                loadAssets()
             }
         } catch {
             // Intentionally ignored for now; Photos framework handles permission errors.
