@@ -286,31 +286,25 @@ public struct PhotoEditorView: View {
 
 
     private var toolOptionsBar: some View {
-        Group {
-            if selectedTool == .adjust {
-                adjustLightControls
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(options(for: selectedTool), id: \.title) { option in
-                            Button {
-                                option.action()
-                            } label: {
-                                Text(option.title)
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .background(Color.white.opacity(0.10), in: Capsule())
-                            }
-                            .buttonStyle(.plain)
-                        }
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(options(for: selectedTool), id: \.title) { option in
+                    Button {
+                        option.action()
+                    } label: {
+                        Text(option.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.white.opacity(0.10), in: Capsule())
                     }
-                    .padding(.horizontal, 16)
+                    .buttonStyle(.plain)
                 }
-                .frame(height: 38)
             }
+            .padding(.horizontal, 16)
         }
+        .frame(height: 38)
         .overlay(alignment: .trailing) {
             if isApplyingOperation {
                 ProgressView()
@@ -318,71 +312,6 @@ public struct PhotoEditorView: View {
                     .padding(.trailing, 20)
             }
         }
-    }
-
-    private var adjustLightControls: some View {
-        VStack(spacing: 10) {
-            lightControlRow(
-                title: "Brightness",
-                subtitle: "Exposure and highlights",
-                decrement: .adjustBrightness(-0.08),
-                increment: .adjustBrightness(0.08)
-            )
-
-            lightControlRow(
-                title: "Contrast",
-                subtitle: "Darks and lights separation",
-                decrement: .adjustContrast(-0.08),
-                increment: .adjustContrast(0.08)
-            )
-
-            lightControlRow(
-                title: "Saturation",
-                subtitle: "Color intensity",
-                decrement: .adjustSaturation(-0.08),
-                increment: .adjustSaturation(0.08)
-            )
-        }
-        .padding(.horizontal, 14)
-    }
-
-    private func lightControlRow(
-        title: String,
-        subtitle: String,
-        decrement: EditOperation,
-        increment: EditOperation
-    ) -> some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                Text(subtitle)
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.65))
-            }
-
-            Spacer(minLength: 0)
-
-            HStack(spacing: 8) {
-                lightStepButton(systemName: "minus", action: { applySingleOperation(decrement) })
-                lightStepButton(systemName: "plus", action: { applySingleOperation(increment) })
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private func lightStepButton(systemName: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 12, weight: .bold))
-                .frame(width: 30, height: 30)
-                .background(.white.opacity(0.16), in: Circle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.white)
     }
 
     // MARK: Actions
@@ -446,7 +375,14 @@ public struct PhotoEditorView: View {
                 ToolOption(title: "Open panel") { showEffectsPanel = true }
             ]
         case .adjust:
-            return []
+            return [
+                ToolOption(title: "Brightness +") { applySingleOperation(.adjustBrightness(0.08)) },
+                ToolOption(title: "Brightness -") { applySingleOperation(.adjustBrightness(-0.08)) },
+                ToolOption(title: "Contrast +") { applySingleOperation(.adjustContrast(0.08)) },
+                ToolOption(title: "Contrast -") { applySingleOperation(.adjustContrast(-0.08)) },
+                ToolOption(title: "Saturation +") { applySingleOperation(.adjustSaturation(0.08)) },
+                ToolOption(title: "Saturation -") { applySingleOperation(.adjustSaturation(-0.08)) }
+            ]
         case .retouch:
             return [
                 ToolOption(title: "Denoise") { applySingleOperation(.denoise(strength: 0.45)) },
