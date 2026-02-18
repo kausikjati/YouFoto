@@ -35,9 +35,8 @@ struct MediaDetailView: View {
 
     var body: some View {
         ZStack {
-            // ── Layer 1: background ───────────────────────────────────────
-            (asset.mediaType == .video ? Color.black : Color(red: 0.91, green: 0.91, blue: 0.92))
-                .ignoresSafeArea()
+            // ── Layer 1: black background ─────────────────────────────────
+            Color.black.ignoresSafeArea()
 
             // ── Layer 2: photo/video content ───────────────────────────────
             if asset.mediaType == .video, let player {
@@ -93,19 +92,54 @@ struct MediaDetailView: View {
                 ProgressView().tint(.white).scaleEffect(1.5)
             }
 
-            // ── Layer 4: top/bottom chrome overlays ──────────────────────────
-            VStack(spacing: 0) {
-                topChrome
-                Spacer(minLength: 0)
+            // ── Layer 4: close button (top-left, always on top, own frame) ─
+            // Placed directly in the ZStack — NOT inside a VStack with
+            // allowsHitTesting. This guarantees the button always receives taps.
+            VStack {
+                HStack {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Circle())
+                    .glassEffect(.regular.interactive(), in: Circle())
+                    .padding(.leading, 20)
+                    .padding(.top, safeTop + 8)
 
-                if asset.mediaType == .video {
-                    videoBar
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, safeBottom + 16)
-                } else {
-                    photoBottomChrome
-                        .padding(.bottom, safeBottom + 16)
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: 8) {
+                        if let d = asset.creationDate {
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(d, style: .date)
+                                Text(d, style: .time)
+                            }
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .glassEffect(.regular, in: Capsule())
+                        }
+
+                        if asset.mediaType == .video {
+                            Label(fmt(duration), systemImage: "video.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.95))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .glassEffect(
+                                    .regular.tint(Color.accentColor.opacity(0.35)),
+                                    in: Capsule()
+                                )
+                        }
+                    }
+                    .padding(.trailing, 20)
+                    .padding(.top, safeTop + 8)
                 }
+                Spacer()
             }
             .ignoresSafeArea()
             .zIndex(10)
@@ -113,119 +147,24 @@ struct MediaDetailView: View {
             .opacity(showControls ? 1 : 0)
             .animation(.easeInOut(duration: 0.2), value: showControls)
 
+            // ── Layer 5: video bar (bottom, own frame) ─────────────────────
+            if asset.mediaType == .video {
+                VStack {
+                    Spacer()
+                    videoBar
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, safeBottom + 16)
+                }
+                .ignoresSafeArea()
+                .opacity(showControls ? 1 : 0)
+                .animation(.easeInOut(duration: 0.2), value: showControls)
+            }
+
         }
         .ignoresSafeArea()
         .statusBarHidden(true)
         .onAppear { loadAsset(); scheduleHide() }
         .onDisappear { cleanup() }
-    }
-
-    private var topChrome: some View {
-        HStack(alignment: .top) {
-            chromeCircleButton(systemName: "chevron.left") { dismiss() }
-
-            Spacer(minLength: 12)
-
-            if let d = asset.creationDate {
-                VStack(spacing: 2) {
-                    Text(d.formatted(.dateTime.day().month(.wide).year()))
-                        .font(.system(size: 22, weight: .bold))
-                    Text(d.formatted(.dateTime.hour().minute()))
-                        .font(.system(size: 16, weight: .medium))
-                }
-                .foregroundStyle(chromeForeground)
-                .padding(.horizontal, 22)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay {
-                    Capsule()
-                        .stroke(.white.opacity(0.6), lineWidth: 1.4)
-                }
-            }
-
-            Spacer(minLength: 12)
-
-            chromeCircleButton(systemName: "ellipsis") { }
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, safeTop + 12)
-    }
-
-    private var photoBottomChrome: some View {
-        VStack(spacing: 14) {
-            photoThumbStrip
-
-            HStack(spacing: 18) {
-                chromeCircleButton(systemName: "square.and.arrow.up") { }
-
-                HStack(spacing: 30) {
-                    Image(systemName: "heart")
-                    Image(systemName: "info.circle")
-                    Image(systemName: "slider.horizontal.3")
-                }
-                .font(.system(size: 34, weight: .regular))
-                .foregroundStyle(chromeForeground)
-                .padding(.horizontal, 36)
-                .padding(.vertical, 14)
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay {
-                    Capsule()
-                        .stroke(.white.opacity(0.55), lineWidth: 1.2)
-                }
-
-                chromeCircleButton(systemName: "trash") { }
-            }
-            .padding(.horizontal, 20)
-        }
-    }
-
-    private var photoThumbStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(0..<10, id: \.self) { _ in
-                    Group {
-                        if let img = fullImage {
-                            Image(uiImage: img)
-                                .resizable()
-                                .scaledToFill()
-                        } else {
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Color.white.opacity(0.35))
-                        }
-                    }
-                    .frame(width: 40, height: 28)
-                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .opacity(0.8)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
-        }
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(.white.opacity(0.48), lineWidth: 1)
-        }
-        .padding(.horizontal, 20)
-    }
-
-    private func chromeCircleButton(systemName: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 32, weight: .medium))
-                .foregroundStyle(chromeForeground)
-                .frame(width: 74, height: 74)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay {
-                    Circle()
-                        .stroke(.white.opacity(0.58), lineWidth: 1.3)
-                }
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var chromeForeground: Color {
-        asset.mediaType == .video ? .white : .black.opacity(0.88)
     }
 
     // ── Video control bar — liquid glass ─────────────────────────────────────
