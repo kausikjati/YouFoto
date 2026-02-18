@@ -564,7 +564,7 @@ private extension UIImage {
 
         if let quarterTurns = [0, 90, 180, 270].first(where: { $0 == normalized }),
            let cgImage,
-           let orientation = imageOrientation.rotatedClockwise(degrees: quarterTurns) {
+           let orientation = Self.rotatedOrientation(imageOrientation, degrees: quarterTurns) {
             return UIImage(cgImage: cgImage, scale: scale, orientation: orientation)
         }
 
@@ -578,6 +578,52 @@ private extension UIImage {
             context.cgContext.translateBy(x: newSize.width / 2, y: newSize.height / 2)
             context.cgContext.rotate(by: radians)
             draw(in: CGRect(x: -size.width / 2, y: -size.height / 2, width: size.width, height: size.height))
+        }
+    }
+
+
+    private static func rotatedOrientation(_ orientation: UIImage.Orientation, degrees: Int) -> UIImage.Orientation? {
+        switch degrees {
+        case 0:
+            return orientation
+        case 90:
+            switch orientation {
+            case .up: return .right
+            case .right: return .down
+            case .down: return .left
+            case .left: return .up
+            case .upMirrored: return .rightMirrored
+            case .rightMirrored: return .downMirrored
+            case .downMirrored: return .leftMirrored
+            case .leftMirrored: return .upMirrored
+            @unknown default: return nil
+            }
+        case 180:
+            switch orientation {
+            case .up: return .down
+            case .right: return .left
+            case .down: return .up
+            case .left: return .right
+            case .upMirrored: return .downMirrored
+            case .rightMirrored: return .leftMirrored
+            case .downMirrored: return .upMirrored
+            case .leftMirrored: return .rightMirrored
+            @unknown default: return nil
+            }
+        case 270:
+            switch orientation {
+            case .up: return .left
+            case .right: return .up
+            case .down: return .right
+            case .left: return .down
+            case .upMirrored: return .leftMirrored
+            case .rightMirrored: return .upMirrored
+            case .downMirrored: return .rightMirrored
+            case .leftMirrored: return .downMirrored
+            @unknown default: return nil
+            }
+        default:
+            return nil
         }
     }
 
