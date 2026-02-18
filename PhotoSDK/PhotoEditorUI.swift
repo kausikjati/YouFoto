@@ -104,7 +104,7 @@ public struct PhotoEditorView: View {
         GeometryReader { geometry in
             let safeTop = geometry.safeAreaInsets.top
             let safeBottom = geometry.safeAreaInsets.bottom
-            let stageSide = adaptiveStageSide(in: geometry.size, safeTop: safeTop, safeBottom: safeBottom)
+            let stageSide = adaptiveStageSide(in: geometry.size)
 
             VStack(spacing: 10) {
                 topBar
@@ -122,18 +122,18 @@ public struct PhotoEditorView: View {
                     bottomToolBar
                 }
             }
-            .padding(.top, safeTop + 4)
-            .padding(.bottom, max(8, safeBottom + 4))
+            .padding(.top, max(4, safeTop == 0 ? 4 : 0))
+            .padding(.bottom, max(8, safeBottom))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .foregroundStyle(.white)
         }
     }
 
-    private func adaptiveStageSide(in size: CGSize, safeTop: CGFloat, safeBottom: CGFloat) -> CGFloat {
+    private func adaptiveStageSide(in size: CGSize) -> CGFloat {
         let horizontalLimit = min(max(size.width - 28, 260), 420)
 
-        // top bar + thumbnail strip + action/tool bars + safe-area paddings
-        let reservedHeight: CGFloat = 58 + 64 + 178 + safeTop + safeBottom
+        // top bar + thumbnail strip + action/tool bars + spacing
+        let reservedHeight: CGFloat = 58 + 64 + 178
         let availableHeight = size.height - reservedHeight
 
         return min(horizontalLimit, max(220, availableHeight))
