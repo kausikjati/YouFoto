@@ -3,10 +3,13 @@
 //  Professional Video Editor SDK for iOS
 //
 
-import SwiftUI
+import Foundation
+import Combine
 import AVFoundation
 import Photos
 import CoreImage
+import CoreGraphics
+import UIKit
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MARK: - VideoEditor Main Class
