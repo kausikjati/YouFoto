@@ -25,6 +25,7 @@ struct ContentView: View {
     @StateObject private var photoEditor = PhotoEditorKit()
     @State private var isPhotoEditorPresented = false
     @State private var isPreparingPhotoEditor = false
+    @State private var selectedVideoAssetForEditor: PHAsset? = nil
     @State private var showEditorUnavailableAlert = false
     private let editorTargetMaxDimension: CGFloat = 2048
 
@@ -87,7 +88,11 @@ struct ContentView: View {
                 onEdit: { media in
                     Task {
                         await performAfterClosingDetail {
-                            await presentPhotoEditor(for: media)
+                            if media.mediaType == .video {
+                                await presentVideoEditor(for: media)
+                            } else {
+                                await presentPhotoEditor(for: media)
+                            }
                         }
                     }
                 },
@@ -105,6 +110,9 @@ struct ContentView: View {
         }
         .fullScreenCover(isPresented: $isPhotoEditorPresented) {
             PhotoEditorSessionView(editor: photoEditor)
+        }
+        .fullScreenCover(item: $selectedVideoAssetForEditor) { asset in
+            VideoEditorView(asset: asset)
         }
         .alert("Photo editor unavailable", isPresented: $showEditorUnavailableAlert) {
             Button("OK", role: .cancel) { }
@@ -128,7 +136,13 @@ struct ContentView: View {
                     Task { await presentShareSheet(for: asset) }
                 },
                 onEdit: { asset in
-                    Task { await presentPhotoEditor(for: asset) }
+                    Task {
+                        if asset.mediaType == .video {
+                            await presentVideoEditor(for: asset)
+                        } else {
+                            await presentPhotoEditor(for: asset)
+                        }
+                    }
                 },
                 onDelete: { asset in
                     Task { await deleteAssets([asset]) }
@@ -237,13 +251,12 @@ struct ContentView: View {
 
                     selectionIconButton(systemName: editActionIcon) {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        if mediaFilter != .photos {
-                            showEditorUnavailableAlert = true
-                            return
-                        }
-
                         Task {
-                            await presentPhotoEditor()
+                            if mediaFilter == .photos {
+                                await presentPhotoEditor()
+                            } else {
+                                await presentVideoEditor()
+                            }
                         }
                     }
                     .accessibilityLabel(editActionLabel)
@@ -373,6 +386,29 @@ struct ContentView: View {
             photoEditor.clear()
             photoEditor.loadImages([image])
             isPhotoEditorPresented = true
+        }
+    }
+
+    private func presentVideoEditor() async {
+        let videos = selectedAssetsInCurrentOrder().filter { $0.mediaType == .video }
+        guard let firstVideo = videos.first else {
+            await MainActor.run { showEditorUnavailableAlert = true }
+            return
+        }
+
+        await MainActor.run {
+            selectedVideoAssetForEditor = firstVideo
+        }
+    }
+
+    private func presentVideoEditor(for asset: PHAsset) async {
+        guard asset.mediaType == .video else {
+            await MainActor.run { showEditorUnavailableAlert = true }
+            return
+        }
+
+        await MainActor.run {
+            selectedVideoAssetForEditor = asset
         }
     }
 
