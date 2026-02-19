@@ -274,7 +274,11 @@ public class VideoEditor: ObservableObject {
     private func buildVideoComposition() async {
         guard let composition = composition else { return }
         
-        videoComposition = await AVVideoComposition.videoComposition(withPropertiesOf: composition)
+        do {
+            videoComposition = try await AVVideoComposition.videoComposition(withPropertiesOf: composition)
+        } catch {
+            videoComposition = nil
+        }
         
         // Apply filters, transitions, overlays
         // This is where effects are rendered
@@ -509,7 +513,7 @@ public struct VideoOverlay: Identifiable {
         case emoji(String)
     }
     
-    public enum OverlayPosition {
+    public enum OverlayPosition: Hashable {
         case top, center, bottom, custom(CGPoint)
     }
     
