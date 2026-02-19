@@ -3,6 +3,11 @@ import Photos
 import UIKit
 import AVFoundation
 
+private struct VideoEditorSelection: Identifiable {
+    let id = UUID()
+    let assets: [PHAsset]
+}
+
 struct ContentView: View {
     @State private var columnCount = 4
     private let minCols = 2
@@ -25,7 +30,7 @@ struct ContentView: View {
     @StateObject private var photoEditor = PhotoEditorKit()
     @State private var isPhotoEditorPresented = false
     @State private var isPreparingPhotoEditor = false
-    @State private var selectedVideoAssetForEditor: PHAsset? = nil
+    @State private var videoEditorSelection: VideoEditorSelection? = nil
     @State private var showEditorUnavailableAlert = false
     private let editorTargetMaxDimension: CGFloat = 2048
 
@@ -111,8 +116,8 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $isPhotoEditorPresented) {
             PhotoEditorSessionView(editor: photoEditor)
         }
-        .fullScreenCover(item: $selectedVideoAssetForEditor) { asset in
-            VideoEditorView(asset: asset)
+        .fullScreenCover(item: $videoEditorSelection) { selection in
+            VideoEditorView(assets: selection.assets)
         }
         .alert("Photo editor unavailable", isPresented: $showEditorUnavailableAlert) {
             Button("OK", role: .cancel) { }
@@ -391,13 +396,13 @@ struct ContentView: View {
 
     private func presentVideoEditor() async {
         let videos = selectedAssetsInCurrentOrder().filter { $0.mediaType == .video }
-        guard let firstVideo = videos.first else {
+        guard !videos.isEmpty else {
             await MainActor.run { showEditorUnavailableAlert = true }
             return
         }
 
         await MainActor.run {
-            selectedVideoAssetForEditor = firstVideo
+            videoEditorSelection = VideoEditorSelection(assets: videos)
         }
     }
 
@@ -408,7 +413,7 @@ struct ContentView: View {
         }
 
         await MainActor.run {
-            selectedVideoAssetForEditor = asset
+            videoEditorSelection = VideoEditorSelection(assets: [asset])
         }
     }
 

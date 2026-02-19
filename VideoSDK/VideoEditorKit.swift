@@ -67,7 +67,20 @@ public class VideoEditor: ObservableObject {
         self.exportManager = ExportManager()
         
         Task {
-            await loadAsset(asset)
+            await loadAssets([asset])
+        }
+    }
+
+    public init(assets: [PHAsset]) {
+        self.timeline = Timeline(clips: [])
+        self.audio = AudioMixer()
+        self.ai = AIEngine()
+        self.filterEngine = FilterEngine()
+        self.transitionEngine = TransitionEngine()
+        self.exportManager = ExportManager()
+
+        Task {
+            await loadAssets(assets)
         }
     }
     
@@ -75,24 +88,34 @@ public class VideoEditor: ObservableObject {
         // Setup AVPlayer for preview
     }
     
-    private func loadAsset(_ asset: PHAsset) async {
-        let options = PHVideoRequestOptions()
-        options.isNetworkAccessAllowed = true
-        
-        await withCheckedContinuation { continuation in
-            PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, _ in
-                if let urlAsset = avAsset as? AVURLAsset {
-                    let clip = VideoClip(url: urlAsset.url)
-                    Task { @MainActor in
-                        self.timeline.clips = [clip]
-                        self.setupPlayer()
-                        continuation.resume()
-                    }
-                } else {
-                    continuation.resume()
-                }
+    private func loadAssets(_ assets: [PHAsset]) async {
+        var loadedClips: [VideoClip] = []
+        loadedClips.reserveCapacity(assets.count)
+
+        for asset in assets {
+            if let clip = await clipForAsset(asset) {
+                loadedClips.append(clip)
             }
         }
+
+        guard !loadedClips.isEmpty else { return }
+        timeline.clips = loadedClips
+        setupPlayer()
+    }
+
+    private func clipForAsset(_ asset: PHAsset) async -> VideoClip? {
+        let options = PHVideoRequestOptions()
+        options.isNetworkAccessAllowed = true
+
+        let url: URL? = await withCheckedContinuation { continuation in
+            PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, _ in
+                let assetURL = (avAsset as? AVURLAsset)?.url
+                continuation.resume(returning: assetURL)
+            }
+        }
+
+        guard let url else { return nil }
+        return VideoClip(url: url)
     }
     
     // ──────────────────────────────────────────────────────────────────────────

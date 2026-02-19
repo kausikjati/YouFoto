@@ -26,6 +26,7 @@ public struct VideoEditorView: View {
     @State private var trimStart: Double = 0
     @State private var trimEnd: Double = 0
     @State private var selectedBlendMode: BlendMode = .normal
+    @State private var previewPlayer: AVPlayer?
 
     public init(videoURL: URL, onComplete: ((ExportResult) -> Void)? = nil) {
         _editor = StateObject(wrappedValue: VideoEditor(videoURL: videoURL))
@@ -37,35 +38,47 @@ public struct VideoEditorView: View {
         self.onComplete = onComplete
     }
 
+    public init(assets: [PHAsset], onComplete: ((ExportResult) -> Void)? = nil) {
+        _editor = StateObject(wrappedValue: VideoEditor(assets: assets))
+        self.onComplete = onComplete
+    }
+
     public var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color.purple.opacity(0.7), Color.blue.opacity(0.65), Color.cyan.opacity(0.6), Color.black],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            Color.black
+                .ignoresSafeArea()
 
-            VStack(spacing: 16) {
-                topBar
+            ScrollView {
+                VStack(spacing: 16) {
+                    topBar
 
-                videoPreview
-                    .frame(maxHeight: 360)
+                    videoPreview
+                        .frame(maxHeight: 360)
 
-                timelineCard
+                    timelineCard
 
-                toolsPanel
+                    toolsPanel
 
-                featureRows
+                    featureRows
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
         }
         .onAppear {
             syncTrimValues()
+            configurePreviewPlayer()
         }
         .onChange(of: editor.timeline.clips.count) { _, _ in
             syncTrimValues()
+            configurePreviewPlayer()
+        }
+        .onChange(of: editor.isPlaying) { _, isPlaying in
+            if isPlaying {
+                previewPlayer?.play()
+            } else {
+                previewPlayer?.pause()
+            }
         }
         .sheet(isPresented: $showEffects) {
             VideoEffectsPanel(editor: editor)
@@ -142,19 +155,22 @@ public struct VideoEditorView: View {
     private var videoPreview: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 28)
-                .fill(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.24), Color.black.opacity(0.72)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+                .fill(Color.black)
                 .overlay {
                     RoundedRectangle(cornerRadius: 28)
                         .stroke(Color.white.opacity(0.35), lineWidth: 1.5)
                 }
 
-            if !editor.isPlaying {
+            if let previewPlayer {
+                VideoPlayer(player: previewPlayer)
+                    .clipShape(RoundedRectangle(cornerRadius: 24))
+                    .padding(6)
+            } else {
+                ProgressView()
+                    .tint(.white)
+            }
+
+            if !editor.isPlaying, previewPlayer != nil {
                 Button {
                     editor.isPlaying = true
                 } label: {
@@ -438,6 +454,19 @@ public struct VideoEditorView: View {
         trimStart = clip.trimStart
         trimEnd = clip.trimEnd
         speed = clip.speed
+    }
+
+    private func configurePreviewPlayer() {
+        guard let clip = editor.timeline.clips.first else {
+            previewPlayer = nil
+            return
+        }
+
+        previewPlayer = AVPlayer(url: clip.url)
+        previewPlayer?.pause()
+        if editor.isPlaying {
+            previewPlayer?.play()
+        }
     }
 
     private func exportQuickly() {
