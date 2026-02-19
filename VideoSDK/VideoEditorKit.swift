@@ -272,13 +272,7 @@ public class VideoEditor: ObservableObject {
     private func buildVideoComposition() {
         guard let composition = composition else { return }
         
-        if #available(iOS 26.0, *) {
-            let configuration = AVVideoComposition.Configuration(asset: composition)
-            configuration.frameDuration = CMTime(value: 1, timescale: 30)  // 30fps
-            videoComposition = AVVideoComposition.videoComposition(with: configuration)
-        } else {
-            videoComposition = AVVideoComposition.videoComposition(withPropertiesOf: composition)
-        }
+        videoComposition = AVVideoComposition.videoComposition(withPropertiesOf: composition)
         
         // Apply filters, transitions, overlays
         // This is where effects are rendered
