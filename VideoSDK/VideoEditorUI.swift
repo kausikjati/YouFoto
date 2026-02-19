@@ -326,30 +326,36 @@ public struct VideoEditorView: View {
                                 .font(.caption2)
                                 .foregroundStyle(.white.opacity(0.85))
 
-                            Circle()
-                                .fill(Color.white)
-                                .frame(width: 10, height: 10)
-                                .position(x: 4, y: 15)
+                            // Left trim handle (larger touch target)
+                            Capsule()
+                                .fill(Color.white.opacity(0.95))
+                                .frame(width: 14, height: 30)
+                                .position(x: 7, y: 15)
+                                .contentShape(Rectangle())
                                 .gesture(
                                     DragGesture(minimumDistance: 0)
                                         .onChanged { value in
                                             let delta = value.translation.width / laneWidth
-                                            let newStart = min(max(0, segment.start + delta), audioSegments[index].end - 0.05)
-                                            audioSegments[index].start = newStart
+                                            let current = audioSegments[index]
+                                            let updatedStart = min(max(0, current.start + delta), current.end - 0.05)
+                                            audioSegments[index].start = updatedStart
                                             syncAudioTrimToClip(clip)
                                         }
                                 )
 
-                            Circle()
-                                .fill(Color.white)
-                                .frame(width: 10, height: 10)
-                                .position(x: width - 4, y: 15)
+                            // Right trim handle (larger touch target)
+                            Capsule()
+                                .fill(Color.white.opacity(0.95))
+                                .frame(width: 14, height: 30)
+                                .position(x: width - 7, y: 15)
+                                .contentShape(Rectangle())
                                 .gesture(
                                     DragGesture(minimumDistance: 0)
                                         .onChanged { value in
                                             let delta = value.translation.width / laneWidth
-                                            let newEnd = max(min(1, segment.end + delta), audioSegments[index].start + 0.05)
-                                            audioSegments[index].end = newEnd
+                                            let current = audioSegments[index]
+                                            let updatedEnd = max(min(1, current.end + delta), current.start + 0.05)
+                                            audioSegments[index].end = updatedEnd
                                             syncAudioTrimToClip(clip)
                                         }
                                 )
@@ -589,7 +595,7 @@ struct ClipThumbnail: View {
                                         Image(uiImage: image)
                                             .resizable()
                                             .scaledToFill()
-                                            .frame(width: (tileWidth - 8) / CGFloat(max(stripImages.count, 1)), height: 64)
+                                            .frame(width: (geo.size.width - 8) / CGFloat(max(stripImages.count, 1)), height: geo.size.height - 8)
                                             .clipped()
                                     }
                                 }
@@ -598,7 +604,7 @@ struct ClipThumbnail: View {
                                 Image(uiImage: thumbnailImage)
                                     .resizable()
                                     .scaledToFill()
-                                    .frame(width: tileWidth - 8, height: 64)
+                                    .frame(width: geo.size.width - 8, height: geo.size.height - 8)
                                     .clipped()
                                     .background(Color.black.opacity(0.35))
                             } else {
