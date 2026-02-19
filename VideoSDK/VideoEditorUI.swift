@@ -5,11 +5,19 @@
 
 import SwiftUI
 import AVKit
+import AVFoundation
 import PhotosUI
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MARK: - Video Editor View (Main Interface)
 // ─────────────────────────────────────────────────────────────────────────────
+
+private struct AudioSegment: Identifiable {
+    let id = UUID()
+    var label: String
+    var start: CGFloat
+    var end: CGFloat
+}
 
 public struct VideoEditorView: View {
     @Environment(\.dismiss) private var dismiss
@@ -22,10 +30,15 @@ public struct VideoEditorView: View {
     @State private var showExport = false
     @State private var selectedTool: EditTool = .trim
     @State private var selectedQuality: ExportQuality = .hd1080p
-    @State private var speed: Double = 1.0
-    @State private var trimStart: Double = 0
-    @State private var trimEnd: Double = 0
-    @State private var selectedBlendMode: BlendMode = .normal
+    @State private var previewPlayer: AVPlayer?
+    @State private var selectedClipID: UUID?
+    @State private var trimAppliedMessage: String = ""
+    @State private var showTrimAppliedAlert = false
+    @State private var timeObserverToken: Any?
+    @State private var timeObserverPlayer: AVPlayer?
+    @State private var audioSegments: [AudioSegment] = [
+        AudioSegment(label: "Track 1", start: 0.08, end: 0.42)
+    ]
 
     public init(videoURL: URL, onComplete: ((ExportResult) -> Void)? = nil) {
         _editor = StateObject(wrappedValue: VideoEditor(videoURL: videoURL))
@@ -37,35 +50,46 @@ public struct VideoEditorView: View {
         self.onComplete = onComplete
     }
 
+    public init(assets: [PHAsset], onComplete: ((ExportResult) -> Void)? = nil) {
+        _editor = StateObject(wrappedValue: VideoEditor(assets: assets))
+        self.onComplete = onComplete
+    }
+
     public var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color.purple.opacity(0.7), Color.blue.opacity(0.65), Color.cyan.opacity(0.6), Color.black],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            Color.black
+                .ignoresSafeArea()
 
-            VStack(spacing: 16) {
-                topBar
+            ScrollView {
+                VStack(spacing: 16) {
+                    topBar
 
-                videoPreview
-                    .frame(maxHeight: 360)
+                    videoPreview
+                        .frame(maxWidth: .infinity)
 
-                timelineCard
+                    timelineCard
 
-                toolsPanel
-
-                featureRows
+                    toolsPanel
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
         }
         .onAppear {
-            syncTrimValues()
+            configurePreviewPlayer()
         }
         .onChange(of: editor.timeline.clips.count) { _, _ in
-            syncTrimValues()
+            configurePreviewPlayer()
+        }
+        .onChange(of: selectedClipID) { _, _ in
+            configurePreviewPlayer()
+        }
+        .onChange(of: editor.isPlaying) { _, isPlaying in
+            togglePlayback(shouldPlay: isPlaying)
+        }
+        .onDisappear {
+            removeTimeObserverIfNeeded()
+            previewPlayer?.pause()
         }
         .sheet(isPresented: $showEffects) {
             VideoEffectsPanel(editor: editor)
@@ -81,6 +105,10 @@ public struct VideoEditorView: View {
         }
     }
 
+    private var selectedClip: VideoClip? {
+        editor.timeline.clips.first(where: { $0.id == selectedClipID }) ?? editor.timeline.clips.first
+    }
+
     // ── Top Bar ──────────────────────────────────────────────────────────────
 
     private var topBar: some View {
@@ -88,16 +116,15 @@ public struct VideoEditorView: View {
             Button {
                 dismiss()
             } label: {
-                Label("Back", systemImage: "chevron.left")
-                    .font(.system(size: 20, weight: .medium))
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 10)
+                    .frame(width: 44, height: 44)
             }
-            .glassEffect(.regular.interactive(), in: Capsule())
+            .glassEffect(.regular.interactive(), in: Circle())
 
-            Text("Project: Sunset Drive")
-                .font(.system(size: 20, weight: .medium))
+            Text("Project")
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity)
@@ -124,15 +151,11 @@ public struct VideoEditorView: View {
                     exportQuickly()
                 }
             } label: {
-                HStack(spacing: 8) {
-                    Text("Export")
-                    Image(systemName: "chevron.down")
-                }
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(.black.opacity(0.85))
-                .padding(.horizontal, 18)
-                .padding(.vertical, 10)
-                .background(Color.white.opacity(0.8), in: Capsule())
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .glassEffect(.regular.interactive(), in: Circle())
             }
         }
     }
@@ -142,40 +165,32 @@ public struct VideoEditorView: View {
     private var videoPreview: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 28)
-                .fill(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.24), Color.black.opacity(0.72)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+                .fill(Color.black)
                 .overlay {
                     RoundedRectangle(cornerRadius: 28)
                         .stroke(Color.white.opacity(0.35), lineWidth: 1.5)
                 }
 
-            if !editor.isPlaying {
-                Button {
-                    editor.isPlaying = true
-                } label: {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 44, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 88, height: 88)
-                }
-                .glassEffect(.regular.interactive(), in: Circle())
+            if let previewPlayer {
+                VideoPreviewLayerView(player: previewPlayer)
+                    .clipShape(RoundedRectangle(cornerRadius: 24))
+                    .padding(6)
+            } else {
+                ProgressView()
+                    .tint(.white)
             }
 
-            VStack {
-                Spacer()
-
-                Text("\(timeString(editor.currentTime)) / \(timeString(editor.timeline.totalDuration))")
-                    .font(.system(.title3, design: .rounded).monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.92))
-                    .padding(.bottom, 18)
+            Button {
+                editor.isPlaying.toggle()
+            } label: {
+                Image(systemName: editor.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 58, height: 58)
             }
+            .glassEffect(.regular.interactive(), in: Circle())
         }
-        .aspectRatio(editor.timeline.aspectRatio.size, contentMode: .fit)
+        .aspectRatio(1, contentMode: .fit)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28))
     }
 
@@ -183,134 +198,61 @@ public struct VideoEditorView: View {
 
     private var timelineCard: some View {
         VStack(spacing: 12) {
-            HStack {
+            HStack(spacing: 10) {
+                Spacer()
+
                 Button {
-                    editor.isPlaying.toggle()
+                    guard let templateURL = selectedClip?.url ?? editor.timeline.clips.first?.url else { return }
+                    let newClip = VideoClip(url: templateURL)
+                    editor.timeline.addClip(newClip)
+                    selectedClipID = newClip.id
                 } label: {
-                    Image(systemName: editor.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.title3)
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
+                    Image(systemName: "plus")
+                        .font(.system(size: 14, weight: .bold))
+                        .frame(width: 30, height: 30)
                 }
-                .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 12))
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: Circle())
 
-                Slider(value: $editor.currentTime, in: 0...max(editor.timeline.totalDuration, 1))
-                    .tint(.cyan)
-
-                zoomRow
+                Button(role: .destructive) {
+                    if let selectedClip,
+                       let index = editor.timeline.clips.firstIndex(where: { $0.id == selectedClip.id }) {
+                        editor.timeline.delete(clipAt: index)
+                        selectedClipID = editor.timeline.clips.first?.id
+                    }
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: Circle())
             }
 
-            VideoTimelineView(timeline: editor.timeline)
-                .frame(height: 88)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14))
+            VideoTimelineView(timeline: editor.timeline, selectedClipID: $selectedClipID)
+                .frame(height: 96)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16))
 
-            Divider().overlay(Color.white.opacity(0.22))
+            if let selectedClip {
+                selectedClipAudioTile(for: selectedClip)
 
-            editorPanel
+                Button("Apply Trim") {
+                    trimAppliedMessage = "Trim applied to selected clip"
+                    showTrimAppliedAlert = true
+                }
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .glassEffect(.regular.interactive(), in: Capsule())
+            }
         }
         .padding(12)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22))
-    }
-
-    private var zoomRow: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "minus.magnifyingglass")
-                .foregroundStyle(.white.opacity(0.75))
-            Image(systemName: "plus.magnifyingglass")
-                .foregroundStyle(.white.opacity(0.75))
-        }
-        .padding(.horizontal, 8)
-    }
-
-    private var editorPanel: some View {
-        VStack(spacing: 10) {
-            switch selectedTool {
-            case .trim:
-                trimPanel
-            case .filters:
-                Button("Open Filters") { showEffects = true }
-                    .buttonStyle(.borderedProminent)
-            case .audio:
-                Button("Open Audio") { showAudio = true }
-                    .buttonStyle(.borderedProminent)
-            case .text:
-                Button("Add Text") { showText = true }
-                    .buttonStyle(.borderedProminent)
-            case .speed:
-                speedPanel
-            case .more:
-                advancedPanel
-            }
-        }
-    }
-
-    private var trimPanel: some View {
-        VStack(spacing: 8) {
-            sliderRow(title: "Start", value: $trimStart, range: 0...max(trimEnd, 0.1)) {
-                editor.timeline.trim(start: trimStart)
-            }
-
-            sliderRow(title: "End", value: $trimEnd, range: min(trimStart + 0.1, max(editor.timeline.totalDuration, 0.1))...max(editor.timeline.totalDuration, 0.1)) {
-                editor.timeline.trim(end: trimEnd)
-            }
-
-            Button("Split at Current Time") {
-                editor.timeline.split(at: editor.currentTime)
-            }
-            .buttonStyle(.bordered)
-        }
-    }
-
-    private var speedPanel: some View {
-        VStack(spacing: 10) {
-            sliderRow(title: "Speed", value: $speed, range: 0.25...2.0) {
-                if let firstClip = editor.timeline.clips.first {
-                    editor.setSpeed(speed, for: firstClip)
-                }
-            }
-
-            Button("Reverse Clip") {
-                if let firstClip = editor.timeline.clips.first {
-                    editor.reverse(firstClip)
-                }
-            }
-            .buttonStyle(.bordered)
-        }
-    }
-
-    private var advancedPanel: some View {
-        VStack(spacing: 10) {
-            HStack {
-                Button("Add Fade Transition") {
-                    if editor.timeline.clips.count > 1 {
-                        editor.addTransition(.fade, between: editor.timeline.clips[0], and: editor.timeline.clips[1])
-                    }
-                }
-                .buttonStyle(.bordered)
-
-                Button("Smart Crop") {
-                    Task {
-                        await editor.smartCrop(to: editor.timeline.aspectRatio, focusOn: .faces)
-                    }
-                }
-                .buttonStyle(.bordered)
-            }
-
-            HStack {
-                Picker("Blend", selection: $selectedBlendMode) {
-                    ForEach(BlendMode.allCases, id: \.self) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.menu)
-
-                Button("Apply") {
-                    if let firstClip = editor.timeline.clips.first {
-                        editor.setBlendMode(selectedBlendMode, for: firstClip)
-                    }
-                }
-                .buttonStyle(.bordered)
-            }
+        .glassEffect(.regular.tint(Color.white.opacity(0.12)), in: RoundedRectangle(cornerRadius: 22))
+        .alert("Trim", isPresented: $showTrimAppliedAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(trimAppliedMessage)
         }
     }
 
@@ -345,99 +287,239 @@ public struct VideoEditorView: View {
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24))
     }
 
-    private var featureRows: some View {
-        VStack(spacing: 12) {
-            featureRow(
-                title: "AI Features",
-                items: [
-                    FeatureItem(title: "AI Editing", icon: "sparkles") {
-                        Task { await editor.smartCrop(to: .horizontal, focusOn: .action) }
-                    },
-                    FeatureItem(title: "Auto Caption", icon: "captions.bubble") {
-                        let caption = VideoOverlay(type: .text("Auto Caption"), position: .bottom)
-                        editor.addOverlay(caption, at: editor.currentTime, duration: 4)
-                    },
-                    FeatureItem(title: "AI Remove BG", icon: "person.crop.rectangle") {
-                        Task { await editor.smartCrop(to: .vertical, focusOn: .center) }
-                    }
-                ],
-                overlayItems: [
-                    FeatureItem(title: "PIP", icon: "rectangle.on.rectangle") {
-                        if let firstClip = editor.timeline.clips.first {
-                            editor.addPiP(videoURL: firstClip.url, at: editor.currentTime, duration: min(3, firstClip.duration), frame: CGRect(x: 40, y: 40, width: 140, height: 200))
-                        }
-                    },
-                    FeatureItem(title: "Blend", icon: "circle.lefthalf.filled") {
-                        if let firstClip = editor.timeline.clips.first {
-                            editor.setBlendMode(.overlay, for: firstClip)
-                        }
-                    }
-                ]
-            )
-
-            featureRow(
-                title: "Aspect Ratio",
-                items: [
-                    FeatureItem(title: "16:9", icon: "rectangle") {
-                        editor.setAspectRatio(.horizontal)
-                    },
-                    FeatureItem(title: "9:16", icon: "rectangle.portrait") {
-                        editor.setAspectRatio(.vertical)
-                    },
-                    FeatureItem(title: "1:1", icon: "square") {
-                        editor.setAspectRatio(.square)
-                    }
-                ],
-                overlayItems: []
-            )
+    private func configurePreviewPlayer() {
+        let fallbackClip = editor.timeline.clips.first
+        let selectedClip = editor.timeline.clips.first(where: { $0.id == selectedClipID })
+        guard let clip = selectedClip ?? fallbackClip else {
+            previewPlayer = nil
+            return
         }
+
+        if selectedClipID == nil {
+            selectedClipID = clip.id
+        }
+
+        previewPlayer = AVPlayer(url: clip.url)
+        togglePlayback(shouldPlay: editor.isPlaying)
     }
 
-    private func featureRow(title: String, items: [FeatureItem], overlayItems: [FeatureItem]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(.white.opacity(0.95))
+    private func selectedClipAudioTile(for clip: VideoClip) -> some View {
+        VStack(spacing: 10) {
+            GeometryReader { geo in
+                let laneWidth = max(1, geo.size.width)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
-                    ForEach(items) { item in
-                        FeatureButton(item: item)
-                    }
-                    if !overlayItems.isEmpty {
-                        Divider().frame(height: 48)
-                        ForEach(overlayItems) { item in
-                            FeatureButton(item: item)
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.black.opacity(0.22))
+
+                    ForEach(audioSegments.indices, id: \.self) { index in
+                        let segment = audioSegments[index]
+                        let width = max(36, (segment.end - segment.start) * laneWidth)
+                        let x = segment.start * laneWidth
+
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.white.opacity(0.22))
+                                .frame(width: width, height: 30)
+
+                            Image(systemName: "waveform")
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.85))
+
+                            // Left trim handle (larger touch target)
+                            Capsule()
+                                .fill(Color.white.opacity(0.95))
+                                .frame(width: 14, height: 30)
+                                .position(x: 7, y: 15)
+                                .contentShape(Rectangle())
+                                .gesture(
+                                    DragGesture(minimumDistance: 0)
+                                        .onChanged { value in
+                                            let delta = value.translation.width / laneWidth
+                                            let current = audioSegments[index]
+                                            let updatedStart = min(max(0, current.start + delta), current.end - 0.05)
+                                            audioSegments[index].start = updatedStart
+                                            syncAudioTrimToClip(clip)
+                                        }
+                                )
+
+                            // Right trim handle (larger touch target)
+                            Capsule()
+                                .fill(Color.white.opacity(0.95))
+                                .frame(width: 14, height: 30)
+                                .position(x: width - 7, y: 15)
+                                .contentShape(Rectangle())
+                                .gesture(
+                                    DragGesture(minimumDistance: 0)
+                                        .onChanged { value in
+                                            let delta = value.translation.width / laneWidth
+                                            let current = audioSegments[index]
+                                            let updatedEnd = max(min(1, current.end + delta), current.start + 0.05)
+                                            audioSegments[index].end = updatedEnd
+                                            syncAudioTrimToClip(clip)
+                                        }
+                                )
                         }
+                        .position(x: x + width / 2, y: geo.size.height / 2)
                     }
                 }
             }
-        }
-        .padding(12)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20))
-    }
+            .frame(height: 42)
 
-    private func sliderRow(title: String, value: Binding<Double>, range: ClosedRange<Double>, action: @escaping () -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                    .font(.subheadline)
+            HStack(spacing: 10) {
+                Button {
+                    let next = AudioSegment(
+                        label: "Track \(audioSegments.count + 1)",
+                        start: 0.05,
+                        end: 0.35
+                    )
+                    audioSegments.append(next)
+                    clip.isAudioDeleted = false
+                    Task { await separateMediaIfNeeded(for: clip) }
+                    showAudio = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 15, weight: .bold))
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: Circle())
+
+                Button(role: .destructive) {
+                    clip.isAudioDeleted = true
+                    clip.separatedAudioURL = nil
+                    audioSegments.removeAll()
+                    previewPlayer?.isMuted = true
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: Circle())
+
                 Spacer()
-                Text(String(format: "%.2f", value.wrappedValue))
-                    .font(.caption.monospacedDigit())
-            }
-            Slider(value: value, in: range) { _ in
-                action()
             }
         }
-        .foregroundStyle(.white)
+        .padding(10)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14))
+        .task(id: clip.id) {
+            await separateMediaIfNeeded(for: clip)
+            syncAudioSegmentsFromClip(clip)
+        }
     }
 
-    private func syncTrimValues() {
-        guard let clip = editor.timeline.clips.first else { return }
-        trimStart = clip.trimStart
-        trimEnd = clip.trimEnd
-        speed = clip.speed
+    private func syncAudioSegmentsFromClip(_ clip: VideoClip) {
+        guard !clip.isAudioDeleted else {
+            audioSegments = []
+            return
+        }
+
+        let total = max(clip.sourceDuration, 0.1)
+        let start = CGFloat(max(0, min(1, clip.audioTrimStart / total)))
+        let end = CGFloat(max(start + 0.05, min(1, clip.audioTrimEnd / total)))
+        audioSegments = [AudioSegment(label: "Track 1", start: start, end: end)]
+    }
+
+    private func syncAudioTrimToClip(_ clip: VideoClip) {
+        guard let first = audioSegments.first else { return }
+        let total = max(clip.sourceDuration, 0.1)
+        clip.audioTrimStart = Double(first.start) * total
+        clip.audioTrimEnd = Double(first.end) * total
+    }
+
+    private func separateMediaIfNeeded(for clip: VideoClip) async {
+        guard clip.separatedAudioURL == nil || clip.separatedVideoURL == nil else { return }
+
+        let asset = AVAsset(url: clip.url)
+        let tempDir = FileManager.default.temporaryDirectory
+        let stamp = UUID().uuidString
+
+        if clip.separatedAudioURL == nil {
+            let audioURL = tempDir.appendingPathComponent("audio_\(stamp).m4a")
+            try? FileManager.default.removeItem(at: audioURL)
+
+            if let audioExport = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) {
+                audioExport.outputURL = audioURL
+                audioExport.outputFileType = .m4a
+                await runExportSession(audioExport)
+                if audioExport.status == .completed {
+                    clip.separatedAudioURL = audioURL
+                    clip.isAudioDeleted = false
+                }
+            }
+        }
+
+        if clip.separatedVideoURL == nil {
+            let composition = AVMutableComposition()
+            guard let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid),
+                  let sourceVideo = asset.tracks(withMediaType: .video).first else {
+                return
+            }
+
+            let range = CMTimeRange(start: .zero, duration: asset.duration)
+            try? videoTrack.insertTimeRange(range, of: sourceVideo, at: .zero)
+
+            let videoURL = tempDir.appendingPathComponent("video_no_audio_\(stamp).mp4")
+            try? FileManager.default.removeItem(at: videoURL)
+
+            if let videoExport = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) {
+                videoExport.outputURL = videoURL
+                videoExport.outputFileType = .mp4
+                await runExportSession(videoExport)
+                if videoExport.status == .completed {
+                    clip.separatedVideoURL = videoURL
+                }
+            }
+        }
+    }
+
+
+    private func runExportSession(_ session: AVAssetExportSession) async {
+        await withCheckedContinuation { continuation in
+            session.exportAsynchronously {
+                continuation.resume()
+            }
+        }
+    }
+
+    private func togglePlayback(shouldPlay: Bool) {
+        guard let previewPlayer, let selectedClip else { return }
+        let start = CMTime(seconds: selectedClip.trimStart, preferredTimescale: 600)
+        let endSeconds = max(selectedClip.trimEnd, selectedClip.trimStart + 0.05)
+        let end = CMTime(seconds: endSeconds, preferredTimescale: 600)
+
+        removeTimeObserverIfNeeded()
+
+        previewPlayer.currentItem?.forwardPlaybackEndTime = end
+        previewPlayer.isMuted = selectedClip.isAudioDeleted
+        previewPlayer.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero)
+
+        if shouldPlay {
+            let token = previewPlayer.addPeriodicTimeObserver(
+                forInterval: CMTime(seconds: 0.05, preferredTimescale: 600),
+                queue: .main
+            ) { [weak previewPlayer] time in
+                if time >= end {
+                    previewPlayer?.pause()
+                    editor.isPlaying = false
+                }
+            }
+            timeObserverToken = token
+            timeObserverPlayer = previewPlayer
+            previewPlayer.play()
+        } else {
+            previewPlayer.pause()
+        }
+    }
+
+
+    private func removeTimeObserverIfNeeded() {
+        if let token = timeObserverToken, let owner = timeObserverPlayer {
+            owner.removeTimeObserver(token)
+        }
+        timeObserverToken = nil
+        timeObserverPlayer = nil
     }
 
     private func exportQuickly() {
@@ -465,42 +547,219 @@ public struct VideoEditorView: View {
 
 struct VideoTimelineView: View {
     @ObservedObject var timeline: Timeline
-    @State private var zoomLevel: CGFloat = 1.0
+    @Binding var selectedClipID: UUID?
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 ForEach(timeline.clips) { clip in
-                    ClipThumbnail(clip: clip, width: 88 * zoomLevel)
+                    ClipThumbnail(clip: clip, isSelected: selectedClipID == clip.id)
+                        .onTapGesture {
+                            selectedClipID = clip.id
+                        }
                 }
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 10)
         }
+        .animation(.spring(response: 0.25, dampingFraction: 0.86), value: selectedClipID)
     }
 }
 
 struct ClipThumbnail: View {
     @ObservedObject var clip: VideoClip
-    let width: CGFloat
+    let isSelected: Bool
+
+    @State private var thumbnailImage: UIImage?
+    @State private var stripImages: [UIImage] = []
+    @State private var trimStartRatio: CGFloat = 0
+    @State private var trimEndRatio: CGFloat = 1
+
+    private var tileWidth: CGFloat { isSelected ? 220 : 104 }
+    private var fullDuration: Double { max(clip.sourceDuration, 0.1) }
+    private var trimmedDuration: Double {
+        max(0.05, Double(trimEndRatio - trimStartRatio) * fullDuration)
+    }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 10)
-            .fill(.white.opacity(0.2))
-            .frame(width: width, height: 62)
+        RoundedRectangle(cornerRadius: 12)
+            .fill(isSelected ? .white.opacity(0.28) : .white.opacity(0.16))
+            .frame(width: tileWidth, height: 72)
             .overlay {
-                VStack(spacing: 2) {
-                    Text(clip.url.lastPathComponent)
-                        .font(.caption2)
-                        .lineLimit(1)
-                    Text(String(format: "%.1fs", clip.duration))
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.75))
+                GeometryReader { geo in
+                    ZStack {
+                        Group {
+                            if isSelected, !stripImages.isEmpty {
+                                HStack(spacing: 2) {
+                                    ForEach(Array(stripImages.enumerated()), id: \.offset) { _, image in
+                                        Image(uiImage: image)
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(width: (geo.size.width - 8) / CGFloat(max(stripImages.count, 1)), height: geo.size.height - 8)
+                                            .clipped()
+                                    }
+                                }
+                                .background(Color.black.opacity(0.35))
+                            } else if let thumbnailImage {
+                                Image(uiImage: thumbnailImage)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: geo.size.width - 8, height: geo.size.height - 8)
+                                    .clipped()
+                                    .background(Color.black.opacity(0.35))
+                            } else {
+                                ZStack {
+                                    Color.white.opacity(0.08)
+                                    Image(systemName: "film")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.75))
+                                }
+                            }
+                        }
+
+                        if isSelected {
+                            let lead = trimStartRatio * geo.size.width
+                            let trail = (1 - trimEndRatio) * geo.size.width
+
+                            HStack(spacing: 0) {
+                                Color.black.opacity(0.50).frame(width: max(0, lead))
+                                Color.clear
+                                Color.black.opacity(0.50).frame(width: max(0, trail))
+                            }
+
+                            Circle()
+                                .fill(Color.white.opacity(0.95))
+                                .frame(width: 10, height: 10)
+                                .position(x: lead, y: geo.size.height / 2)
+                                .gesture(
+                                    DragGesture(minimumDistance: 0)
+                                        .onChanged { value in
+                                            let next = min(max(0, value.location.x / geo.size.width), trimEndRatio - 0.05)
+                                            trimStartRatio = next
+                                            applyTrim()
+                                        }
+                                )
+
+                            Circle()
+                                .fill(Color.white.opacity(0.95))
+                                .frame(width: 10, height: 10)
+                                .position(x: trimEndRatio * geo.size.width, y: geo.size.height / 2)
+                                .gesture(
+                                    DragGesture(minimumDistance: 0)
+                                        .onChanged { value in
+                                            let next = max(min(1, value.location.x / geo.size.width), trimStartRatio + 0.05)
+                                            trimEndRatio = next
+                                            applyTrim()
+                                        }
+                                )
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
-                .foregroundStyle(.white)
                 .padding(4)
             }
+            .overlay(alignment: .bottomTrailing) {
+                Text(String(format: "%.1fs", trimmedDuration))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.black.opacity(0.55), in: Capsule())
+                    .padding(8)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isSelected ? Color.white.opacity(0.85) : Color.clear, lineWidth: 1.5)
+            }
+            .animation(.spring(response: 0.24, dampingFraction: 0.84), value: isSelected)
+            .onAppear {
+                loadThumbnail()
+                loadStripThumbnails()
+                syncRatiosFromClip()
+            }
+            .onChange(of: isSelected) { _, selected in
+                if selected {
+                    syncRatiosFromClip()
+                }
+            }
     }
+
+    private func syncRatiosFromClip() {
+        let duration = fullDuration
+        guard duration > 0 else { return }
+        trimStartRatio = CGFloat(max(0, min(1, clip.trimStart / duration)))
+        trimEndRatio = CGFloat(max(trimStartRatio + 0.05, min(1, clip.trimEnd / duration)))
+    }
+
+    private func applyTrim() {
+        let duration = fullDuration
+        clip.trimStart = Double(trimStartRatio) * duration
+        clip.trimEnd = Double(trimEndRatio) * duration
+        clip.duration = max(0.05, clip.trimEnd - clip.trimStart)
+    }
+
+    private func loadStripThumbnails() {
+        guard stripImages.isEmpty else { return }
+
+        let asset = AVAsset(url: clip.url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 220, height: 180)
+
+        let total = max(clip.sourceDuration, 0.1)
+        let points: [Double] = [0.15, 0.5, 0.85].map { total * $0 }
+
+        Task.detached {
+            var images: [UIImage] = []
+            for second in points {
+                if let cg = try? generator.copyCGImage(at: CMTime(seconds: second, preferredTimescale: 600), actualTime: nil) {
+                    images.append(UIImage(cgImage: cg))
+                }
+            }
+            guard !images.isEmpty else { return }
+            await MainActor.run {
+                stripImages = images
+            }
+        }
+    }
+
+    private func loadThumbnail() {
+        guard thumbnailImage == nil else { return }
+
+        let asset = AVAsset(url: clip.url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 420, height: 280)
+
+        Task.detached {
+            let cgImage = try? generator.copyCGImage(at: .zero, actualTime: nil)
+            guard let cgImage else { return }
+            let image = UIImage(cgImage: cgImage)
+            await MainActor.run {
+                thumbnailImage = image
+            }
+        }
+    }
+}
+
+private struct VideoPreviewLayerView: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> PlayerContainerView {
+        let view = PlayerContainerView()
+        view.playerLayer.videoGravity = .resizeAspect
+        view.playerLayer.player = player
+        return view
+    }
+
+    func updateUIView(_ uiView: PlayerContainerView, context: Context) {
+        uiView.playerLayer.player = player
+    }
+}
+
+private final class PlayerContainerView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
