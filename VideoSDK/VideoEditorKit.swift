@@ -266,13 +266,15 @@ public class VideoEditor: ObservableObject {
         }
         
         // Build video composition for effects
-        buildVideoComposition()
+        Task { [weak self] in
+            await self?.buildVideoComposition()
+        }
     }
     
-    private func buildVideoComposition() {
+    private func buildVideoComposition() async {
         guard let composition = composition else { return }
         
-        videoComposition = AVVideoComposition.videoComposition(withPropertiesOf: composition)
+        videoComposition = await AVVideoComposition.videoComposition(withPropertiesOf: composition)
         
         // Apply filters, transitions, overlays
         // This is where effects are rendered
