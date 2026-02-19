@@ -5,6 +5,7 @@
 
 import SwiftUI
 import AVKit
+import AVFoundation
 import PhotosUI
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -153,33 +154,12 @@ public struct VideoEditorView: View {
                 }
 
             if let previewPlayer {
-                VideoPlayer(player: previewPlayer)
+                VideoPreviewLayerView(player: previewPlayer)
                     .clipShape(RoundedRectangle(cornerRadius: 24))
                     .padding(6)
             } else {
                 ProgressView()
                     .tint(.white)
-            }
-
-            if !editor.isPlaying, previewPlayer != nil {
-                Button {
-                    editor.isPlaying = true
-                } label: {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 44, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 88, height: 88)
-                }
-                .glassEffect(.regular.interactive(), in: Circle())
-            }
-
-            VStack {
-                Spacer()
-
-                Text("\(timeString(editor.currentTime)) / \(timeString(editor.timeline.totalDuration))")
-                    .font(.system(.title3, design: .rounded).monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.92))
-                    .padding(.bottom, 18)
             }
         }
         .aspectRatio(1, contentMode: .fit)
@@ -201,15 +181,11 @@ public struct VideoEditorView: View {
                 }
                 .glassEffect(.regular.interactive(), in: Circle())
 
-                Text("\(timeString(editor.currentTime)) / \(timeString(editor.timeline.totalDuration))")
-                    .font(.system(.subheadline, design: .rounded).monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.92))
-
                 Spacer()
 
                 Text("\(editor.timeline.clips.count) clips")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.75))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.8))
             }
 
             VideoTimelineView(timeline: editor.timeline, selectedClipID: $selectedClipID)
@@ -317,24 +293,83 @@ struct ClipThumbnail: View {
     @ObservedObject var clip: VideoClip
     let isSelected: Bool
 
+    @State private var thumbnailImage: UIImage?
+
     var body: some View {
         RoundedRectangle(cornerRadius: 12)
             .fill(isSelected ? .white.opacity(0.28) : .white.opacity(0.16))
             .frame(width: 104, height: 72)
             .overlay {
-                VStack(spacing: 6) {
-                    Image(systemName: "film")
-                        .font(.system(size: 18, weight: .semibold))
-                    Text(String(format: "%.1fs", clip.duration))
-                        .font(.caption2.weight(.semibold))
+                Group {
+                    if let thumbnailImage {
+                        Image(uiImage: thumbnailImage)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        ZStack {
+                            Color.white.opacity(0.08)
+                            Image(systemName: "film")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.75))
+                        }
+                    }
                 }
-                .foregroundStyle(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .padding(4)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                Text(String(format: "%.1fs", clip.duration))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.black.opacity(0.55), in: Capsule())
+                    .padding(8)
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 12)
-                    .stroke(isSelected ? Color.white.opacity(0.8) : Color.clear, lineWidth: 1.5)
+                    .stroke(isSelected ? Color.white.opacity(0.85) : Color.clear, lineWidth: 1.5)
             }
+            .onAppear(perform: loadThumbnail)
     }
+
+    private func loadThumbnail() {
+        guard thumbnailImage == nil else { return }
+
+        let asset = AVAsset(url: clip.url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 280, height: 280)
+
+        Task.detached {
+            let cgImage = try? generator.copyCGImage(at: .zero, actualTime: nil)
+            guard let cgImage else { return }
+            let image = UIImage(cgImage: cgImage)
+            await MainActor.run {
+                thumbnailImage = image
+            }
+        }
+    }
+}
+
+private struct VideoPreviewLayerView: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> PlayerContainerView {
+        let view = PlayerContainerView()
+        view.playerLayer.videoGravity = .resizeAspect
+        view.playerLayer.player = player
+        return view
+    }
+
+    func updateUIView(_ uiView: PlayerContainerView, context: Context) {
+        uiView.playerLayer.player = player
+    }
+}
+
+private final class PlayerContainerView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
