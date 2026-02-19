@@ -25,6 +25,9 @@ public struct VideoEditorView: View {
     @State private var selectedQuality: ExportQuality = .hd1080p
     @State private var previewPlayer: AVPlayer?
     @State private var selectedClipID: UUID?
+    @State private var trimAppliedMessage: String = ""
+    @State private var showTrimAppliedAlert = false
+    @State private var timeObserverToken: Any?
 
     public init(videoURL: URL, onComplete: ((ExportResult) -> Void)? = nil) {
         _editor = StateObject(wrappedValue: VideoEditor(videoURL: videoURL))
@@ -71,11 +74,14 @@ public struct VideoEditorView: View {
             configurePreviewPlayer()
         }
         .onChange(of: editor.isPlaying) { _, isPlaying in
-            if isPlaying {
-                previewPlayer?.play()
-            } else {
-                previewPlayer?.pause()
+            togglePlayback(shouldPlay: isPlaying)
+        }
+        .onDisappear {
+            if let token = timeObserverToken {
+                previewPlayer?.removeTimeObserver(token)
+                timeObserverToken = nil
             }
+            previewPlayer?.pause()
         }
         .sheet(isPresented: $showEffects) {
             VideoEffectsPanel(editor: editor)
@@ -89,6 +95,10 @@ public struct VideoEditorView: View {
         .sheet(isPresented: $showExport) {
             VideoExportSheet(editor: editor, onComplete: onComplete)
         }
+    }
+
+    private var selectedClip: VideoClip? {
+        editor.timeline.clips.first(where: { $0.id == selectedClipID }) ?? editor.timeline.clips.first
     }
 
     // ── Top Bar ──────────────────────────────────────────────────────────────
@@ -161,6 +171,16 @@ public struct VideoEditorView: View {
                 ProgressView()
                     .tint(.white)
             }
+
+            Button {
+                editor.isPlaying.toggle()
+            } label: {
+                Image(systemName: editor.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 58, height: 58)
+            }
+            .glassEffect(.regular.interactive(), in: Circle())
         }
         .aspectRatio(1, contentMode: .fit)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28))
@@ -191,9 +211,28 @@ public struct VideoEditorView: View {
             VideoTimelineView(timeline: editor.timeline, selectedClipID: $selectedClipID)
                 .frame(height: 96)
                 .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16))
+
+            if let selectedClip {
+                selectedClipAudioTile(for: selectedClip)
+
+                Button("Apply Trim") {
+                    trimAppliedMessage = "Trim applied to selected clip"
+                    showTrimAppliedAlert = true
+                }
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .glassEffect(.regular.interactive(), in: Capsule())
+            }
         }
         .padding(12)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22))
+        .alert("Trim", isPresented: $showTrimAppliedAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(trimAppliedMessage)
+        }
     }
 
     // ── Tool Rail ─────────────────────────────────────────────────────────────
@@ -240,9 +279,84 @@ public struct VideoEditorView: View {
         }
 
         previewPlayer = AVPlayer(url: clip.url)
-        previewPlayer?.pause()
-        if editor.isPlaying {
-            previewPlayer?.play()
+        togglePlayback(shouldPlay: editor.isPlaying)
+    }
+
+    private func selectedClipAudioTile(for clip: VideoClip) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Audio")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.72))
+
+            HStack(spacing: 10) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .frame(width: 28, height: 28)
+                    .glassEffect(.regular, in: Circle())
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(clip.url.deletingPathExtension().lastPathComponent)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Text("Original audio")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+
+                Spacer()
+
+                Button("Add") {
+                    showAudio = true
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .glassEffect(.regular.interactive(), in: Capsule())
+
+                Button(role: .destructive) {
+                    // UI-first placeholder for removing attached audio.
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: Circle())
+            }
+        }
+        .padding(10)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func togglePlayback(shouldPlay: Bool) {
+        guard let previewPlayer, let selectedClip else { return }
+        let start = CMTime(seconds: selectedClip.trimStart, preferredTimescale: 600)
+        let endSeconds = max(selectedClip.trimEnd, selectedClip.trimStart + 0.05)
+        let end = CMTime(seconds: endSeconds, preferredTimescale: 600)
+
+        if let token = timeObserverToken {
+            previewPlayer.removeTimeObserver(token)
+            timeObserverToken = nil
+        }
+
+        previewPlayer.currentItem?.forwardPlaybackEndTime = end
+        previewPlayer.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero)
+
+        if shouldPlay {
+            let token = previewPlayer.addPeriodicTimeObserver(
+                forInterval: CMTime(seconds: 0.05, preferredTimescale: 600),
+                queue: .main
+            ) { [weak previewPlayer] time in
+                if time >= end {
+                    previewPlayer?.pause()
+                    editor.isPlaying = false
+                }
+            }
+            timeObserverToken = token
+            previewPlayer.play()
+        } else {
+            previewPlayer.pause()
         }
     }
 
