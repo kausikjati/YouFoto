@@ -328,13 +328,13 @@ public struct VideoEditorView: View {
 
                             Circle()
                                 .fill(Color.white)
-                                .frame(width: 8, height: 8)
+                                .frame(width: 10, height: 10)
                                 .position(x: 4, y: 15)
                                 .gesture(
                                     DragGesture(minimumDistance: 0)
                                         .onChanged { value in
-                                            let absolute = min(max(0, x + value.location.x), laneWidth)
-                                            let newStart = min(max(0, absolute / laneWidth), audioSegments[index].end - 0.05)
+                                            let delta = value.translation.width / laneWidth
+                                            let newStart = min(max(0, segment.start + delta), audioSegments[index].end - 0.05)
                                             audioSegments[index].start = newStart
                                             syncAudioTrimToClip(clip)
                                         }
@@ -342,13 +342,13 @@ public struct VideoEditorView: View {
 
                             Circle()
                                 .fill(Color.white)
-                                .frame(width: 8, height: 8)
+                                .frame(width: 10, height: 10)
                                 .position(x: width - 4, y: 15)
                                 .gesture(
                                     DragGesture(minimumDistance: 0)
                                         .onChanged { value in
-                                            let absolute = min(max(0, x + value.location.x), laneWidth)
-                                            let newEnd = max(min(1, absolute / laneWidth), audioSegments[index].start + 0.05)
+                                            let delta = value.translation.width / laneWidth
+                                            let newEnd = max(min(1, segment.end + delta), audioSegments[index].start + 0.05)
                                             audioSegments[index].end = newEnd
                                             syncAudioTrimToClip(clip)
                                         }
@@ -589,7 +589,7 @@ struct ClipThumbnail: View {
                                         Image(uiImage: image)
                                             .resizable()
                                             .scaledToFill()
-                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                            .frame(width: (tileWidth - 8) / CGFloat(max(stripImages.count, 1)), height: 64)
                                             .clipped()
                                     }
                                 }
@@ -598,7 +598,7 @@ struct ClipThumbnail: View {
                                 Image(uiImage: thumbnailImage)
                                     .resizable()
                                     .scaledToFill()
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .frame(width: tileWidth - 8, height: 64)
                                     .clipped()
                                     .background(Color.black.opacity(0.35))
                             } else {
