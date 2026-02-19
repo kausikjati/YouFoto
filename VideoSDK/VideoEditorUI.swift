@@ -22,11 +22,8 @@ public struct VideoEditorView: View {
     @State private var showExport = false
     @State private var selectedTool: EditTool = .trim
     @State private var selectedQuality: ExportQuality = .hd1080p
-    @State private var speed: Double = 1.0
-    @State private var trimStart: Double = 0
-    @State private var trimEnd: Double = 0
-    @State private var selectedBlendMode: BlendMode = .normal
     @State private var previewPlayer: AVPlayer?
+    @State private var selectedClipID: UUID?
 
     public init(videoURL: URL, onComplete: ((ExportResult) -> Void)? = nil) {
         _editor = StateObject(wrappedValue: VideoEditor(videoURL: videoURL))
@@ -53,24 +50,23 @@ public struct VideoEditorView: View {
                     topBar
 
                     videoPreview
-                        .frame(maxHeight: 360)
+                        .frame(maxWidth: .infinity)
 
                     timelineCard
 
                     toolsPanel
-
-                    featureRows
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
             }
         }
         .onAppear {
-            syncTrimValues()
             configurePreviewPlayer()
         }
         .onChange(of: editor.timeline.clips.count) { _, _ in
-            syncTrimValues()
+            configurePreviewPlayer()
+        }
+        .onChange(of: selectedClipID) { _, _ in
             configurePreviewPlayer()
         }
         .onChange(of: editor.isPlaying) { _, isPlaying in
@@ -101,16 +97,15 @@ public struct VideoEditorView: View {
             Button {
                 dismiss()
             } label: {
-                Label("Back", systemImage: "chevron.left")
-                    .font(.system(size: 20, weight: .medium))
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 10)
+                    .frame(width: 44, height: 44)
             }
-            .glassEffect(.regular.interactive(), in: Capsule())
+            .glassEffect(.regular.interactive(), in: Circle())
 
-            Text("Project: Sunset Drive")
-                .font(.system(size: 20, weight: .medium))
+            Text("Project")
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity)
@@ -137,15 +132,11 @@ public struct VideoEditorView: View {
                     exportQuickly()
                 }
             } label: {
-                HStack(spacing: 8) {
-                    Text("Export")
-                    Image(systemName: "chevron.down")
-                }
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(.black.opacity(0.85))
-                .padding(.horizontal, 18)
-                .padding(.vertical, 10)
-                .background(Color.white.opacity(0.8), in: Capsule())
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .glassEffect(.regular.interactive(), in: Circle())
             }
         }
     }
@@ -191,7 +182,7 @@ public struct VideoEditorView: View {
                     .padding(.bottom, 18)
             }
         }
-        .aspectRatio(editor.timeline.aspectRatio.size, contentMode: .fit)
+        .aspectRatio(1, contentMode: .fit)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28))
     }
 
@@ -199,135 +190,34 @@ public struct VideoEditorView: View {
 
     private var timelineCard: some View {
         VStack(spacing: 12) {
-            HStack {
+            HStack(spacing: 10) {
                 Button {
                     editor.isPlaying.toggle()
                 } label: {
                     Image(systemName: editor.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.title3)
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(width: 44, height: 44)
                 }
-                .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 12))
+                .glassEffect(.regular.interactive(), in: Circle())
 
-                Slider(value: $editor.currentTime, in: 0...max(editor.timeline.totalDuration, 1))
-                    .tint(.cyan)
+                Text("\(timeString(editor.currentTime)) / \(timeString(editor.timeline.totalDuration))")
+                    .font(.system(.subheadline, design: .rounded).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.92))
 
-                zoomRow
+                Spacer()
+
+                Text("\(editor.timeline.clips.count) clips")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.75))
             }
 
-            VideoTimelineView(timeline: editor.timeline)
-                .frame(height: 88)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14))
-
-            Divider().overlay(Color.white.opacity(0.22))
-
-            editorPanel
+            VideoTimelineView(timeline: editor.timeline, selectedClipID: $selectedClipID)
+                .frame(height: 96)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16))
         }
         .padding(12)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22))
-    }
-
-    private var zoomRow: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "minus.magnifyingglass")
-                .foregroundStyle(.white.opacity(0.75))
-            Image(systemName: "plus.magnifyingglass")
-                .foregroundStyle(.white.opacity(0.75))
-        }
-        .padding(.horizontal, 8)
-    }
-
-    private var editorPanel: some View {
-        VStack(spacing: 10) {
-            switch selectedTool {
-            case .trim:
-                trimPanel
-            case .filters:
-                Button("Open Filters") { showEffects = true }
-                    .buttonStyle(.borderedProminent)
-            case .audio:
-                Button("Open Audio") { showAudio = true }
-                    .buttonStyle(.borderedProminent)
-            case .text:
-                Button("Add Text") { showText = true }
-                    .buttonStyle(.borderedProminent)
-            case .speed:
-                speedPanel
-            case .more:
-                advancedPanel
-            }
-        }
-    }
-
-    private var trimPanel: some View {
-        VStack(spacing: 8) {
-            sliderRow(title: "Start", value: $trimStart, range: 0...max(trimEnd, 0.1)) {
-                editor.timeline.trim(start: trimStart)
-            }
-
-            sliderRow(title: "End", value: $trimEnd, range: min(trimStart + 0.1, max(editor.timeline.totalDuration, 0.1))...max(editor.timeline.totalDuration, 0.1)) {
-                editor.timeline.trim(end: trimEnd)
-            }
-
-            Button("Split at Current Time") {
-                editor.timeline.split(at: editor.currentTime)
-            }
-            .buttonStyle(.bordered)
-        }
-    }
-
-    private var speedPanel: some View {
-        VStack(spacing: 10) {
-            sliderRow(title: "Speed", value: $speed, range: 0.25...2.0) {
-                if let firstClip = editor.timeline.clips.first {
-                    editor.setSpeed(speed, for: firstClip)
-                }
-            }
-
-            Button("Reverse Clip") {
-                if let firstClip = editor.timeline.clips.first {
-                    editor.reverse(firstClip)
-                }
-            }
-            .buttonStyle(.bordered)
-        }
-    }
-
-    private var advancedPanel: some View {
-        VStack(spacing: 10) {
-            HStack {
-                Button("Add Fade Transition") {
-                    if editor.timeline.clips.count > 1 {
-                        editor.addTransition(.fade, between: editor.timeline.clips[0], and: editor.timeline.clips[1])
-                    }
-                }
-                .buttonStyle(.bordered)
-
-                Button("Smart Crop") {
-                    Task {
-                        await editor.smartCrop(to: editor.timeline.aspectRatio, focusOn: .faces)
-                    }
-                }
-                .buttonStyle(.bordered)
-            }
-
-            HStack {
-                Picker("Blend", selection: $selectedBlendMode) {
-                    ForEach(BlendMode.allCases, id: \.self) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.menu)
-
-                Button("Apply") {
-                    if let firstClip = editor.timeline.clips.first {
-                        editor.setBlendMode(selectedBlendMode, for: firstClip)
-                    }
-                }
-                .buttonStyle(.bordered)
-            }
-        }
     }
 
     // ── Tool Rail ─────────────────────────────────────────────────────────────
@@ -361,105 +251,16 @@ public struct VideoEditorView: View {
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24))
     }
 
-    private var featureRows: some View {
-        VStack(spacing: 12) {
-            featureRow(
-                title: "AI Features",
-                items: [
-                    FeatureItem(title: "AI Editing", icon: "sparkles") {
-                        Task { await editor.smartCrop(to: .horizontal, focusOn: .action) }
-                    },
-                    FeatureItem(title: "Auto Caption", icon: "captions.bubble") {
-                        let caption = VideoOverlay(type: .text("Auto Caption"), position: .bottom)
-                        editor.addOverlay(caption, at: editor.currentTime, duration: 4)
-                    },
-                    FeatureItem(title: "AI Remove BG", icon: "person.crop.rectangle") {
-                        Task { await editor.smartCrop(to: .vertical, focusOn: .center) }
-                    }
-                ],
-                overlayItems: [
-                    FeatureItem(title: "PIP", icon: "rectangle.on.rectangle") {
-                        if let firstClip = editor.timeline.clips.first {
-                            editor.addPiP(videoURL: firstClip.url, at: editor.currentTime, duration: min(3, firstClip.duration), frame: CGRect(x: 40, y: 40, width: 140, height: 200))
-                        }
-                    },
-                    FeatureItem(title: "Blend", icon: "circle.lefthalf.filled") {
-                        if let firstClip = editor.timeline.clips.first {
-                            editor.setBlendMode(.overlay, for: firstClip)
-                        }
-                    }
-                ]
-            )
-
-            featureRow(
-                title: "Aspect Ratio",
-                items: [
-                    FeatureItem(title: "16:9", icon: "rectangle") {
-                        editor.setAspectRatio(.horizontal)
-                    },
-                    FeatureItem(title: "9:16", icon: "rectangle.portrait") {
-                        editor.setAspectRatio(.vertical)
-                    },
-                    FeatureItem(title: "1:1", icon: "square") {
-                        editor.setAspectRatio(.square)
-                    }
-                ],
-                overlayItems: []
-            )
-        }
-    }
-
-    private func featureRow(title: String, items: [FeatureItem], overlayItems: [FeatureItem]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(.white.opacity(0.95))
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
-                    ForEach(items) { item in
-                        FeatureButton(item: item)
-                    }
-                    if !overlayItems.isEmpty {
-                        Divider().frame(height: 48)
-                        ForEach(overlayItems) { item in
-                            FeatureButton(item: item)
-                        }
-                    }
-                }
-            }
-        }
-        .padding(12)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20))
-    }
-
-    private func sliderRow(title: String, value: Binding<Double>, range: ClosedRange<Double>, action: @escaping () -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                    .font(.subheadline)
-                Spacer()
-                Text(String(format: "%.2f", value.wrappedValue))
-                    .font(.caption.monospacedDigit())
-            }
-            Slider(value: value, in: range) { _ in
-                action()
-            }
-        }
-        .foregroundStyle(.white)
-    }
-
-    private func syncTrimValues() {
-        guard let clip = editor.timeline.clips.first else { return }
-        trimStart = clip.trimStart
-        trimEnd = clip.trimEnd
-        speed = clip.speed
-    }
-
     private func configurePreviewPlayer() {
-        guard let clip = editor.timeline.clips.first else {
+        let fallbackClip = editor.timeline.clips.first
+        let selectedClip = editor.timeline.clips.first(where: { $0.id == selectedClipID })
+        guard let clip = selectedClip ?? fallbackClip else {
             previewPlayer = nil
             return
+        }
+
+        if selectedClipID == nil {
+            selectedClipID = clip.id
         }
 
         previewPlayer = AVPlayer(url: clip.url)
@@ -494,13 +295,16 @@ public struct VideoEditorView: View {
 
 struct VideoTimelineView: View {
     @ObservedObject var timeline: Timeline
-    @State private var zoomLevel: CGFloat = 1.0
+    @Binding var selectedClipID: UUID?
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 ForEach(timeline.clips) { clip in
-                    ClipThumbnail(clip: clip, width: 88 * zoomLevel)
+                    ClipThumbnail(clip: clip, isSelected: selectedClipID == clip.id)
+                        .onTapGesture {
+                            selectedClipID = clip.id
+                        }
                 }
             }
             .padding(.horizontal, 6)
@@ -511,23 +315,24 @@ struct VideoTimelineView: View {
 
 struct ClipThumbnail: View {
     @ObservedObject var clip: VideoClip
-    let width: CGFloat
+    let isSelected: Bool
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 10)
-            .fill(.white.opacity(0.2))
-            .frame(width: width, height: 62)
+        RoundedRectangle(cornerRadius: 12)
+            .fill(isSelected ? .white.opacity(0.28) : .white.opacity(0.16))
+            .frame(width: 104, height: 72)
             .overlay {
-                VStack(spacing: 2) {
-                    Text(clip.url.lastPathComponent)
-                        .font(.caption2)
-                        .lineLimit(1)
+                VStack(spacing: 6) {
+                    Image(systemName: "film")
+                        .font(.system(size: 18, weight: .semibold))
                     Text(String(format: "%.1fs", clip.duration))
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.75))
+                        .font(.caption2.weight(.semibold))
                 }
                 .foregroundStyle(.white)
-                .padding(4)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isSelected ? Color.white.opacity(0.8) : Color.clear, lineWidth: 1.5)
             }
     }
 }
