@@ -12,6 +12,13 @@ import PhotosUI
 // MARK: - Video Editor View (Main Interface)
 // ─────────────────────────────────────────────────────────────────────────────
 
+private struct AudioSegment: Identifiable {
+    let id = UUID()
+    var label: String
+    var start: CGFloat
+    var end: CGFloat
+}
+
 public struct VideoEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var editor: VideoEditor
@@ -29,6 +36,9 @@ public struct VideoEditorView: View {
     @State private var showTrimAppliedAlert = false
     @State private var timeObserverToken: Any?
     @State private var timeObserverPlayer: AVPlayer?
+    @State private var audioSegments: [AudioSegment] = [
+        AudioSegment(label: "Track 1", start: 0.08, end: 0.42)
+    ]
 
     public init(videoURL: URL, onComplete: ((ExportResult) -> Void)? = nil) {
         _editor = StateObject(wrappedValue: VideoEditor(videoURL: videoURL))
@@ -188,6 +198,37 @@ public struct VideoEditorView: View {
 
     private var timelineCard: some View {
         VStack(spacing: 12) {
+            HStack(spacing: 10) {
+                Spacer()
+
+                Button {
+                    guard let templateURL = selectedClip?.url ?? editor.timeline.clips.first?.url else { return }
+                    let newClip = VideoClip(url: templateURL)
+                    editor.timeline.addClip(newClip)
+                    selectedClipID = newClip.id
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 14, weight: .bold))
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: Circle())
+
+                Button(role: .destructive) {
+                    if let selectedClip,
+                       let index = editor.timeline.clips.firstIndex(where: { $0.id == selectedClip.id }) {
+                        editor.timeline.removeClip(at: index)
+                        selectedClipID = editor.timeline.clips.first?.id
+                    }
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: Circle())
+            }
+
             VideoTimelineView(timeline: editor.timeline, selectedClipID: $selectedClipID)
                 .frame(height: 96)
                 .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16))
@@ -263,21 +304,52 @@ public struct VideoEditorView: View {
     }
 
     private func selectedClipAudioTile(for _: VideoClip) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Audio")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.72))
+        VStack(spacing: 10) {
+            GeometryReader { geo in
+                let laneWidth = max(1, geo.size.width)
+
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.black.opacity(0.22))
+
+                    ForEach(audioSegments.indices, id: \.self) { index in
+                        let segment = audioSegments[index]
+                        let width = max(36, (segment.end - segment.start) * laneWidth)
+                        let x = segment.start * laneWidth
+
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.white.opacity(0.22))
+                            .frame(width: width, height: 30)
+                            .overlay {
+                                Image(systemName: "waveform")
+                                    .font(.caption2)
+                                    .foregroundStyle(.white.opacity(0.85))
+                            }
+                            .position(x: x + width / 2, y: geo.size.height / 2)
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { value in
+                                        let normalized = min(max(0, value.location.x / laneWidth), 1)
+                                        let segmentWidth = max(0.08, segment.end - segment.start)
+                                        var start = normalized - segmentWidth / 2
+                                        start = min(max(0, start), 1 - segmentWidth)
+                                        audioSegments[index].start = start
+                                        audioSegments[index].end = start + segmentWidth
+                                    }
+                            )
+                    }
+                }
+            }
+            .frame(height: 42)
 
             HStack(spacing: 10) {
-                Image(systemName: "waveform")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .frame(width: 28, height: 28)
-                    .glassEffect(.regular, in: Circle())
-
-                Spacer()
-
                 Button {
+                    let next = AudioSegment(
+                        label: "Track \(audioSegments.count + 1)",
+                        start: 0.05,
+                        end: 0.35
+                    )
+                    audioSegments.append(next)
                     showAudio = true
                 } label: {
                     Image(systemName: "plus")
@@ -288,7 +360,9 @@ public struct VideoEditorView: View {
                 .glassEffect(.regular.interactive(), in: Circle())
 
                 Button(role: .destructive) {
-                    // UI-first placeholder for removing attached audio.
+                    if !audioSegments.isEmpty {
+                        audioSegments.removeLast()
+                    }
                 } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 14, weight: .semibold))
@@ -296,6 +370,8 @@ public struct VideoEditorView: View {
                 }
                 .buttonStyle(.plain)
                 .glassEffect(.regular.interactive(), in: Circle())
+
+                Spacer()
             }
         }
         .padding(10)
@@ -389,11 +465,12 @@ struct ClipThumbnail: View {
     let isSelected: Bool
 
     @State private var thumbnailImage: UIImage?
+    @State private var stripImages: [UIImage] = []
     @State private var trimStartRatio: CGFloat = 0
     @State private var trimEndRatio: CGFloat = 1
 
     private var tileWidth: CGFloat { isSelected ? 220 : 104 }
-    private var fullDuration: Double { max(clip.trimEnd, clip.duration + clip.trimStart, 0.1) }
+    private var fullDuration: Double { max(clip.sourceDuration, 0.1) }
     private var trimmedDuration: Double {
         max(0.05, Double(trimEndRatio - trimStartRatio) * fullDuration)
     }
@@ -406,11 +483,23 @@ struct ClipThumbnail: View {
                 GeometryReader { geo in
                     ZStack {
                         Group {
-                            if let thumbnailImage {
+                            if isSelected, !stripImages.isEmpty {
+                                HStack(spacing: 2) {
+                                    ForEach(Array(stripImages.enumerated()), id: \.offset) { _, image in
+                                        Image(uiImage: image)
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                            .clipped()
+                                    }
+                                }
+                                .background(Color.black.opacity(0.35))
+                            } else if let thumbnailImage {
                                 Image(uiImage: thumbnailImage)
                                     .resizable()
-                                    .scaledToFit()
+                                    .scaledToFill()
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .clipped()
                                     .background(Color.black.opacity(0.35))
                             } else {
                                 ZStack {
@@ -479,6 +568,7 @@ struct ClipThumbnail: View {
             .animation(.spring(response: 0.24, dampingFraction: 0.84), value: isSelected)
             .onAppear {
                 loadThumbnail()
+                loadStripThumbnails()
                 syncRatiosFromClip()
             }
             .onChange(of: isSelected) { _, selected in
@@ -500,6 +590,31 @@ struct ClipThumbnail: View {
         clip.trimStart = Double(trimStartRatio) * duration
         clip.trimEnd = Double(trimEndRatio) * duration
         clip.duration = max(0.05, clip.trimEnd - clip.trimStart)
+    }
+
+    private func loadStripThumbnails() {
+        guard stripImages.isEmpty else { return }
+
+        let asset = AVAsset(url: clip.url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 220, height: 180)
+
+        let total = max(clip.sourceDuration, 0.1)
+        let points: [Double] = [0.15, 0.5, 0.85].map { total * $0 }
+
+        Task.detached {
+            var images: [UIImage] = []
+            for second in points {
+                if let cg = try? generator.copyCGImage(at: CMTime(seconds: second, preferredTimescale: 600), actualTime: nil) {
+                    images.append(UIImage(cgImage: cg))
+                }
+            }
+            guard !images.isEmpty else { return }
+            await MainActor.run {
+                stripImages = images
+            }
+        }
     }
 
     private func loadThumbnail() {

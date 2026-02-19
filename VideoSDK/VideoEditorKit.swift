@@ -448,6 +448,7 @@ public class VideoClip: Identifiable, ObservableObject {
     @Published public var trimStart: Double = 0
     @Published public var trimEnd: Double = 0
     @Published public var duration: Double
+    public let sourceDuration: Double
     @Published public var startTime: Double = 0
     
     @Published public var filter: VideoFilter?
@@ -465,8 +466,9 @@ public class VideoClip: Identifiable, ObservableObject {
     public init(url: URL) {
         self.url = url
         let asset = AVAsset(url: url)
-        self.duration = asset.duration.seconds
-        self.trimEnd = duration
+        self.sourceDuration = asset.duration.seconds
+        self.duration = sourceDuration
+        self.trimEnd = sourceDuration
     }
     
     public func split(at time: Double) -> VideoClip {
