@@ -26,6 +26,20 @@ enum VideoAspectRatio: String, CaseIterable, Identifiable {
     }
 }
 
+enum OverlayMode: String, CaseIterable, Identifiable {
+    case normal = "Normal"
+    case multiply = "Multiply"
+    case screen = "Screen"
+    case overlay = "Overlay"
+
+    var id: String { rawValue }
+}
+
+private struct ClipSegment: Identifiable, Equatable {
+    let id = UUID()
+    var title: String
+}
+
 struct VideoEditorView: View {
     let asset: PHAsset
     let videoURL: URL
@@ -34,23 +48,58 @@ struct VideoEditorView: View {
     @State private var player: AVPlayer?
     @State private var selectedExportQuality: VideoExportQuality = .p1080
     @State private var selectedAspectRatio: VideoAspectRatio = .landscape
+    @State private var selectedOverlayMode: OverlayMode = .normal
+
+    @State private var trimStart: Double = 0
+    @State private var trimEnd: Double = 1
+    @State private var timelineZoom: Double = 1
+
     @State private var brightness: Double = 0
     @State private var contrast: Double = 1
     @State private var saturation: Double = 1
     @State private var temperature: Double = 0
+
+    @State private var audioTrimStart: Double = 0
+    @State private var audioTrimEnd: Double = 1
     @State private var audioVolume: Double = 1
+    @State private var audioFadeIn = true
+    @State private var audioFadeOut = true
+
     @State private var speed: Double = 1
+    @State private var reverseVideo = false
+
+    @State private var enablePiP = false
+    @State private var enableGreenScreen = false
+
+    @State private var aiAutoVideoCreation = false
+    @State private var aiAutoHighlightDetection = false
+    @State private var aiSceneDetection = false
+    @State private var aiTextToSpeech = false
+    @State private var aiAutoSubtitleGeneration = false
+    @State private var aiRemoveBackground = false
+    @State private var aiBlurBackground = false
+
+    @State private var clips: [ClipSegment] = [
+        ClipSegment(title: "Clip 1"),
+        ClipSegment(title: "Clip 2"),
+        ClipSegment(title: "Clip 3")
+    ]
+
+    private var safeDuration: Double {
+        max(asset.duration, 1)
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    playerCard
-                    exportAndShareCard
-                    trimAndTimelineCard
+                    previewCard
+                    exportCard
+                    trimAndCutCard
+                    timelineCard
                     filtersCard
                     audioCard
-                    textCard
+                    textAndTitlesCard
                     transitionsCard
                     speedCard
                     aspectRatioCard
@@ -65,7 +114,6 @@ struct VideoEditorView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { onClose() }
                 }
-
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Export") { }
                         .fontWeight(.semibold)
@@ -80,7 +128,7 @@ struct VideoEditorView: View {
         }
     }
 
-    private var playerCard: some View {
+    private var previewCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Preview")
                 .font(.headline)
@@ -108,7 +156,7 @@ struct VideoEditorView: View {
         .cardStyle()
     }
 
-    private var exportAndShareCard: some View {
+    private var exportCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Export video")
                 .font(.headline)
@@ -120,41 +168,75 @@ struct VideoEditorView: View {
             }
             .pickerStyle(.segmented)
 
-            featureRows([
-                "Share to social media",
-                "Save to gallery"
-            ])
+            Label("Share to social media", systemImage: "square.and.arrow.up")
+                .font(.subheadline)
+            Label("Save to gallery", systemImage: "photo.badge.plus")
+                .font(.subheadline)
         }
         .cardStyle()
     }
 
-    private var trimAndTimelineCard: some View {
+    private var trimAndCutCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Trim, Cut & Timeline")
+            Text("✂️ Trim & Cut")
                 .font(.headline)
 
-            featureRows([
-                "Trim start and end",
-                "Split video into parts",
-                "Delete unwanted clips",
-                "Simple horizontal timeline",
-                "Drag & drop clips",
-                "Zoom timeline"
-            ])
+            sliderRow(title: "Trim start and end (start)", value: $trimStart, range: 0...safeDuration)
+            sliderRow(title: "Trim start and end (end)", value: $trimEnd, range: trimStart...safeDuration)
 
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.secondary.opacity(0.15))
-                .frame(height: 70)
-                .overlay(alignment: .leading) {
-                    HStack(spacing: 6) {
-                        ForEach(0..<7, id: \.self) { _ in
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.accentColor.opacity(0.5))
-                                .frame(width: 42, height: 52)
-                        }
-                    }
-                    .padding(.horizontal, 10)
+            HStack(spacing: 10) {
+                Button("Split video into parts") {
+                    clips.append(ClipSegment(title: "Clip \(clips.count + 1)"))
                 }
+                .buttonStyle(.bordered)
+
+                Button("Delete unwanted clips") {
+                    if !clips.isEmpty {
+                        clips.removeLast()
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
+            .font(.subheadline)
+        }
+        .cardStyle()
+    }
+
+    private var timelineCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("📌 Timeline Editor")
+                .font(.headline)
+
+            Text("Simple horizontal timeline")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(clips.enumerated()), id: \.element.id) { index, clip in
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.accentColor.opacity(0.22))
+                            .frame(width: 90 * timelineZoom, height: 56)
+                            .overlay {
+                                Text(clip.title)
+                                    .font(.caption)
+                            }
+                            .onTapGesture {
+                                if index + 1 < clips.count {
+                                    clips.swapAt(index, index + 1)
+                                }
+                            }
+                    }
+                }
+                .padding(6)
+            }
+            .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            Text("Drag & drop clips (tap a clip to move it forward in this scaffold)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            sliderRow(title: "Zoom timeline", value: $timelineZoom, range: 1...2.2)
         }
         .cardStyle()
     }
@@ -164,42 +246,43 @@ struct VideoEditorView: View {
             Text("Filters & Effects")
                 .font(.headline)
 
-            featureRows([
-                "Vintage",
-                "Black & white",
-                "Cinematic"
-            ])
+            Text("Basic filters")
+                .font(.subheadline.weight(.semibold))
+            chipRow(["Vintage", "Black & white", "Cinematic"])
 
-            Group {
-                sliderRow(title: "Brightness", value: $brightness, range: -1...1)
-                sliderRow(title: "Contrast", value: $contrast, range: 0...2)
-                sliderRow(title: "Saturation", value: $saturation, range: 0...2)
-                sliderRow(title: "Temperature", value: $temperature, range: -1...1)
-            }
+            Text("Color adjustments")
+                .font(.subheadline.weight(.semibold))
+            sliderRow(title: "Brightness", value: $brightness, range: -1...1)
+            sliderRow(title: "Contrast", value: $contrast, range: 0...2)
+            sliderRow(title: "Saturation", value: $saturation, range: 0...2)
+            sliderRow(title: "Temperature", value: $temperature, range: -1...1)
         }
         .cardStyle()
     }
 
     private var audioCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Audio Editing")
+            Text("🎵 Audio Editing")
                 .font(.headline)
 
             featureRows([
                 "Add music from library",
-                "Voice-over recording",
-                "Audio trimming",
-                "Fade in / fade out"
+                "Voice-over recording"
             ])
 
-            sliderRow(title: "Volume", value: $audioVolume, range: 0...2)
+            sliderRow(title: "Audio trimming (start)", value: $audioTrimStart, range: 0...safeDuration)
+            sliderRow(title: "Audio trimming (end)", value: $audioTrimEnd, range: audioTrimStart...safeDuration)
+            sliderRow(title: "Volume control", value: $audioVolume, range: 0...2)
+
+            Toggle("Fade in", isOn: $audioFadeIn)
+            Toggle("Fade out", isOn: $audioFadeOut)
         }
         .cardStyle()
     }
 
-    private var textCard: some View {
+    private var textAndTitlesCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Text & Titles")
+            Text("📝 Text & Titles")
                 .font(.headline)
 
             featureRows([
@@ -217,35 +300,29 @@ struct VideoEditorView: View {
             Text("Transitions")
                 .font(.headline)
 
-            featureRows([
-                "Fade",
-                "Slide",
-                "Zoom",
-                "3D transitions"
-            ])
+            chipRow(["Fade", "Slide", "Zoom", "3D transitions"])
         }
         .cardStyle()
     }
 
     private var speedCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Speed Control")
+            Text("⏩ Speed Control")
                 .font(.headline)
 
             featureRows([
                 "Slow motion",
-                "Fast motion",
-                "Reverse video"
+                "Fast motion"
             ])
-
-            sliderRow(title: "Playback speed", value: $speed, range: 0.25...2)
+            sliderRow(title: "Speed", value: $speed, range: 0.25...2)
+            Toggle("Reverse video", isOn: $reverseVideo)
         }
         .cardStyle()
     }
 
     private var aspectRatioCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Aspect Ratio")
+            Text("📱 Aspect Ratio")
                 .font(.headline)
 
             Picker("Ratio", selection: $selectedAspectRatio) {
@@ -261,32 +338,41 @@ struct VideoEditorView: View {
 
     private var overlayCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Overlay & Picture in Picture")
+            Text("🖼️ Overlay & Picture in Picture")
                 .font(.headline)
 
-            featureRows([
-                "Add video over video",
-                "Blend modes",
-                "Green screen (chroma key)"
-            ])
+            Toggle("Add video over video", isOn: $enablePiP)
+
+            Picker("Blend modes", selection: $selectedOverlayMode) {
+                ForEach(OverlayMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Toggle("Green screen (chroma key)", isOn: $enableGreenScreen)
         }
         .cardStyle()
     }
 
     private var aiCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("AI Features")
+            Text("🤖 AI Features")
                 .font(.headline)
 
-            featureRows([
-                "Auto video creation",
-                "Auto highlight detection",
-                "AI scene detection",
-                "Text to speech",
-                "Auto subtitle generation",
-                "Remove background",
-                "Blur background"
-            ])
+            Toggle("AI Editing · Auto video creation", isOn: $aiAutoVideoCreation)
+            Toggle("Auto highlight detection", isOn: $aiAutoHighlightDetection)
+            Toggle("AI scene detection", isOn: $aiSceneDetection)
+
+            Text("AI Voice")
+                .font(.subheadline.weight(.semibold))
+            Toggle("Text to speech", isOn: $aiTextToSpeech)
+            Toggle("Auto subtitle generation", isOn: $aiAutoSubtitleGeneration)
+
+            Text("AI Background")
+                .font(.subheadline.weight(.semibold))
+            Toggle("Remove background", isOn: $aiRemoveBackground)
+            Toggle("Blur background", isOn: $aiBlurBackground)
         }
         .cardStyle()
     }
@@ -301,6 +387,10 @@ struct VideoEditorView: View {
         }
     }
 
+    private func chipRow(_ items: [String]) -> some View {
+        FlexibleChipRow(items: items)
+    }
+
     private func sliderRow(title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -312,6 +402,24 @@ struct VideoEditorView: View {
             .font(.subheadline)
 
             Slider(value: value, in: range)
+        }
+    }
+}
+
+private struct FlexibleChipRow: View {
+    let items: [String]
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(items, id: \.self) { item in
+                    Text(item)
+                        .font(.subheadline)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.secondary.opacity(0.14), in: Capsule())
+                }
+            }
         }
     }
 }
