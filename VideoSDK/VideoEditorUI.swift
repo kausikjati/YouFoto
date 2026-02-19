@@ -28,6 +28,7 @@ public struct VideoEditorView: View {
     @State private var trimAppliedMessage: String = ""
     @State private var showTrimAppliedAlert = false
     @State private var timeObserverToken: Any?
+    @State private var timeObserverPlayer: AVPlayer?
 
     public init(videoURL: URL, onComplete: ((ExportResult) -> Void)? = nil) {
         _editor = StateObject(wrappedValue: VideoEditor(videoURL: videoURL))
@@ -77,10 +78,7 @@ public struct VideoEditorView: View {
             togglePlayback(shouldPlay: isPlaying)
         }
         .onDisappear {
-            if let token = timeObserverToken {
-                previewPlayer?.removeTimeObserver(token)
-                timeObserverToken = nil
-            }
+            removeTimeObserverIfNeeded()
             previewPlayer?.pause()
         }
         .sheet(isPresented: $showEffects) {
@@ -190,24 +188,6 @@ public struct VideoEditorView: View {
 
     private var timelineCard: some View {
         VStack(spacing: 12) {
-            HStack(spacing: 10) {
-                Button {
-                    editor.isPlaying.toggle()
-                } label: {
-                    Image(systemName: editor.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                }
-                .glassEffect(.regular.interactive(), in: Circle())
-
-                Spacer()
-
-                Text("\(editor.timeline.clips.count) clips")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.8))
-            }
-
             VideoTimelineView(timeline: editor.timeline, selectedClipID: $selectedClipID)
                 .frame(height: 96)
                 .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16))
@@ -227,7 +207,7 @@ public struct VideoEditorView: View {
             }
         }
         .padding(12)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22))
+        .glassEffect(.regular.tint(Color.white.opacity(0.12)), in: RoundedRectangle(cornerRadius: 22))
         .alert("Trim", isPresented: $showTrimAppliedAlert) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -282,7 +262,7 @@ public struct VideoEditorView: View {
         togglePlayback(shouldPlay: editor.isPlaying)
     }
 
-    private func selectedClipAudioTile(for clip: VideoClip) -> some View {
+    private func selectedClipAudioTile(for _: VideoClip) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Audio")
                 .font(.caption.weight(.semibold))
@@ -295,24 +275,17 @@ public struct VideoEditorView: View {
                     .frame(width: 28, height: 28)
                     .glassEffect(.regular, in: Circle())
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(clip.url.deletingPathExtension().lastPathComponent)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    Text("Original audio")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.72))
-                }
-
                 Spacer()
 
-                Button("Add") {
+                Button {
                     showAudio = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 15, weight: .bold))
+                        .frame(width: 30, height: 30)
                 }
                 .buttonStyle(.plain)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .glassEffect(.regular.interactive(), in: Capsule())
+                .glassEffect(.regular.interactive(), in: Circle())
 
                 Button(role: .destructive) {
                     // UI-first placeholder for removing attached audio.
@@ -335,10 +308,7 @@ public struct VideoEditorView: View {
         let endSeconds = max(selectedClip.trimEnd, selectedClip.trimStart + 0.05)
         let end = CMTime(seconds: endSeconds, preferredTimescale: 600)
 
-        if let token = timeObserverToken {
-            previewPlayer.removeTimeObserver(token)
-            timeObserverToken = nil
-        }
+        removeTimeObserverIfNeeded()
 
         previewPlayer.currentItem?.forwardPlaybackEndTime = end
         previewPlayer.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero)
@@ -354,10 +324,20 @@ public struct VideoEditorView: View {
                 }
             }
             timeObserverToken = token
+            timeObserverPlayer = previewPlayer
             previewPlayer.play()
         } else {
             previewPlayer.pause()
         }
+    }
+
+
+    private func removeTimeObserverIfNeeded() {
+        if let token = timeObserverToken, let owner = timeObserverPlayer {
+            owner.removeTimeObserver(token)
+        }
+        timeObserverToken = nil
+        timeObserverPlayer = nil
     }
 
     private func exportQuickly() {
@@ -429,7 +409,9 @@ struct ClipThumbnail: View {
                             if let thumbnailImage {
                                 Image(uiImage: thumbnailImage)
                                     .resizable()
-                                    .scaledToFill()
+                                    .scaledToFit()
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .background(Color.black.opacity(0.35))
                             } else {
                                 ZStack {
                                     Color.white.opacity(0.08)
