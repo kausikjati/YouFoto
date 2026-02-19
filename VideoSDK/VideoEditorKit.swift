@@ -450,6 +450,12 @@ public class VideoClip: Identifiable, ObservableObject {
     @Published public var duration: Double
     public let sourceDuration: Double
     @Published public var startTime: Double = 0
+
+    @Published public var separatedVideoURL: URL?
+    @Published public var separatedAudioURL: URL?
+    @Published public var audioTrimStart: Double = 0
+    @Published public var audioTrimEnd: Double = 0
+    @Published public var isAudioDeleted: Bool = false
     
     @Published public var filter: VideoFilter?
     @Published public var adjustments = ColorAdjustments()
@@ -469,6 +475,7 @@ public class VideoClip: Identifiable, ObservableObject {
         self.sourceDuration = asset.duration.seconds
         self.duration = sourceDuration
         self.trimEnd = sourceDuration
+        self.audioTrimEnd = sourceDuration
     }
     
     public func split(at time: Double) -> VideoClip {

@@ -303,7 +303,7 @@ public struct VideoEditorView: View {
         togglePlayback(shouldPlay: editor.isPlaying)
     }
 
-    private func selectedClipAudioTile(for _: VideoClip) -> some View {
+    private func selectedClipAudioTile(for clip: VideoClip) -> some View {
         VStack(spacing: 10) {
             GeometryReader { geo in
                 let laneWidth = max(1, geo.size.width)
@@ -317,26 +317,44 @@ public struct VideoEditorView: View {
                         let width = max(36, (segment.end - segment.start) * laneWidth)
                         let x = segment.start * laneWidth
 
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.white.opacity(0.22))
-                            .frame(width: width, height: 30)
-                            .overlay {
-                                Image(systemName: "waveform")
-                                    .font(.caption2)
-                                    .foregroundStyle(.white.opacity(0.85))
-                            }
-                            .position(x: x + width / 2, y: geo.size.height / 2)
-                            .gesture(
-                                DragGesture(minimumDistance: 0)
-                                    .onChanged { value in
-                                        let normalized = min(max(0, value.location.x / laneWidth), 1)
-                                        let segmentWidth = max(0.08, segment.end - segment.start)
-                                        var start = normalized - segmentWidth / 2
-                                        start = min(max(0, start), 1 - segmentWidth)
-                                        audioSegments[index].start = start
-                                        audioSegments[index].end = start + segmentWidth
-                                    }
-                            )
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.white.opacity(0.22))
+                                .frame(width: width, height: 30)
+
+                            Image(systemName: "waveform")
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.85))
+
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: 8, height: 8)
+                                .position(x: 4, y: 15)
+                                .gesture(
+                                    DragGesture(minimumDistance: 0)
+                                        .onChanged { value in
+                                            let absolute = min(max(0, x + value.location.x), laneWidth)
+                                            let newStart = min(max(0, absolute / laneWidth), audioSegments[index].end - 0.05)
+                                            audioSegments[index].start = newStart
+                                            syncAudioTrimToClip(clip)
+                                        }
+                                )
+
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: 8, height: 8)
+                                .position(x: width - 4, y: 15)
+                                .gesture(
+                                    DragGesture(minimumDistance: 0)
+                                        .onChanged { value in
+                                            let absolute = min(max(0, x + value.location.x), laneWidth)
+                                            let newEnd = max(min(1, absolute / laneWidth), audioSegments[index].start + 0.05)
+                                            audioSegments[index].end = newEnd
+                                            syncAudioTrimToClip(clip)
+                                        }
+                                )
+                        }
+                        .position(x: x + width / 2, y: geo.size.height / 2)
                     }
                 }
             }
@@ -350,6 +368,8 @@ public struct VideoEditorView: View {
                         end: 0.35
                     )
                     audioSegments.append(next)
+                    clip.isAudioDeleted = false
+                    Task { await separateMediaIfNeeded(for: clip) }
                     showAudio = true
                 } label: {
                     Image(systemName: "plus")
@@ -360,9 +380,10 @@ public struct VideoEditorView: View {
                 .glassEffect(.regular.interactive(), in: Circle())
 
                 Button(role: .destructive) {
-                    if !audioSegments.isEmpty {
-                        audioSegments.removeLast()
-                    }
+                    clip.isAudioDeleted = true
+                    clip.separatedAudioURL = nil
+                    audioSegments.removeAll()
+                    previewPlayer?.isMuted = true
                 } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 14, weight: .semibold))
@@ -376,6 +397,84 @@ public struct VideoEditorView: View {
         }
         .padding(10)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14))
+        .task(id: clip.id) {
+            await separateMediaIfNeeded(for: clip)
+            syncAudioSegmentsFromClip(clip)
+        }
+    }
+
+    private func syncAudioSegmentsFromClip(_ clip: VideoClip) {
+        guard !clip.isAudioDeleted else {
+            audioSegments = []
+            return
+        }
+
+        let total = max(clip.sourceDuration, 0.1)
+        let start = CGFloat(max(0, min(1, clip.audioTrimStart / total)))
+        let end = CGFloat(max(start + 0.05, min(1, clip.audioTrimEnd / total)))
+        audioSegments = [AudioSegment(label: "Track 1", start: start, end: end)]
+    }
+
+    private func syncAudioTrimToClip(_ clip: VideoClip) {
+        guard let first = audioSegments.first else { return }
+        let total = max(clip.sourceDuration, 0.1)
+        clip.audioTrimStart = Double(first.start) * total
+        clip.audioTrimEnd = Double(first.end) * total
+    }
+
+    private func separateMediaIfNeeded(for clip: VideoClip) async {
+        guard clip.separatedAudioURL == nil || clip.separatedVideoURL == nil else { return }
+
+        let asset = AVAsset(url: clip.url)
+        let tempDir = FileManager.default.temporaryDirectory
+        let stamp = UUID().uuidString
+
+        if clip.separatedAudioURL == nil {
+            let audioURL = tempDir.appendingPathComponent("audio_\(stamp).m4a")
+            try? FileManager.default.removeItem(at: audioURL)
+
+            if let audioExport = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) {
+                audioExport.outputURL = audioURL
+                audioExport.outputFileType = .m4a
+                await runExportSession(audioExport)
+                if audioExport.status == .completed {
+                    clip.separatedAudioURL = audioURL
+                    clip.isAudioDeleted = false
+                }
+            }
+        }
+
+        if clip.separatedVideoURL == nil {
+            let composition = AVMutableComposition()
+            guard let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid),
+                  let sourceVideo = asset.tracks(withMediaType: .video).first else {
+                return
+            }
+
+            let range = CMTimeRange(start: .zero, duration: asset.duration)
+            try? videoTrack.insertTimeRange(range, of: sourceVideo, at: .zero)
+
+            let videoURL = tempDir.appendingPathComponent("video_no_audio_\(stamp).mp4")
+            try? FileManager.default.removeItem(at: videoURL)
+
+            if let videoExport = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) {
+                videoExport.outputURL = videoURL
+                videoExport.outputFileType = .mp4
+                await runExportSession(videoExport)
+                if videoExport.status == .completed {
+                    clip.separatedVideoURL = videoURL
+                }
+            }
+        }
+    }
+
+
+    private func runExportSession(_ session: AVAssetExportSession) async {
+        await withCheckedContinuation { continuation in
+            session.exportAsynchronously {
+                continuation.resume()
+            }
+        }
     }
 
     private func togglePlayback(shouldPlay: Bool) {
@@ -387,6 +486,7 @@ public struct VideoEditorView: View {
         removeTimeObserverIfNeeded()
 
         previewPlayer.currentItem?.forwardPlaybackEndTime = end
+        previewPlayer.isMuted = selectedClip.isAudioDeleted
         previewPlayer.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero)
 
         if shouldPlay {
