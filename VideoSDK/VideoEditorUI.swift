@@ -68,16 +68,16 @@ public struct VideoEditorView: View {
             syncTrimValues()
         }
         .sheet(isPresented: $showEffects) {
-            EffectsPanel(editor: editor)
+            VideoEffectsPanel(editor: editor)
         }
         .sheet(isPresented: $showText) {
-            TextOverlayPanel(editor: editor)
+            VideoTextOverlayPanel(editor: editor)
         }
         .sheet(isPresented: $showAudio) {
-            AudioPanel(editor: editor)
+            VideoAudioPanel(editor: editor)
         }
         .sheet(isPresented: $showExport) {
-            ExportSheet(editor: editor, onComplete: onComplete)
+            VideoExportSheet(editor: editor, onComplete: onComplete)
         }
     }
 
@@ -200,7 +200,7 @@ public struct VideoEditorView: View {
                 zoomRow
             }
 
-            TimelineView(timeline: editor.timeline)
+            VideoTimelineView(timeline: editor.timeline)
                 .frame(height: 88)
                 .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14))
 
@@ -318,25 +318,25 @@ public struct VideoEditorView: View {
 
     private var toolsPanel: some View {
         HStack(spacing: 12) {
-            ToolButton(icon: "scissors", title: "Trim", isSelected: selectedTool == .trim) {
+            VideoToolButton(icon: "scissors", title: "Trim", isSelected: selectedTool == .trim) {
                 selectedTool = .trim
             }
-            ToolButton(icon: "camera.filters", title: "Filters", isSelected: selectedTool == .filters) {
+            VideoToolButton(icon: "camera.filters", title: "Filters", isSelected: selectedTool == .filters) {
                 selectedTool = .filters
                 showEffects = true
             }
-            ToolButton(icon: "music.note", title: "Audio", isSelected: selectedTool == .audio) {
+            VideoToolButton(icon: "music.note", title: "Audio", isSelected: selectedTool == .audio) {
                 selectedTool = .audio
                 showAudio = true
             }
-            ToolButton(icon: "textformat", title: "Text", isSelected: selectedTool == .text) {
+            VideoToolButton(icon: "textformat", title: "Text", isSelected: selectedTool == .text) {
                 selectedTool = .text
                 showText = true
             }
-            ToolButton(icon: "gauge.with.dots.needle.50percent", title: "Speed", isSelected: selectedTool == .speed) {
+            VideoToolButton(icon: "gauge.with.dots.needle.50percent", title: "Speed", isSelected: selectedTool == .speed) {
                 selectedTool = .speed
             }
-            ToolButton(icon: "ellipsis", title: "More", isSelected: selectedTool == .more) {
+            VideoToolButton(icon: "ellipsis", title: "More", isSelected: selectedTool == .more) {
                 selectedTool = .more
             }
         }
@@ -463,7 +463,7 @@ public struct VideoEditorView: View {
 // MARK: - Timeline View
 // ─────────────────────────────────────────────────────────────────────────────
 
-struct TimelineView: View {
+struct VideoTimelineView: View {
     @ObservedObject var timeline: Timeline
     @State private var zoomLevel: CGFloat = 1.0
 
@@ -507,7 +507,7 @@ struct ClipThumbnail: View {
 // MARK: - Effects Panel
 // ─────────────────────────────────────────────────────────────────────────────
 
-struct EffectsPanel: View {
+struct VideoEffectsPanel: View {
     @ObservedObject var editor: VideoEditor
     @Environment(\.dismiss) private var dismiss
 
@@ -545,7 +545,7 @@ struct EffectsPanel: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(VideoFilter.allCases, id: \.self) { filter in
-                        FilterButton(
+                        VideoFilterButton(
                             filter: filter,
                             isSelected: selectedFilter == filter
                         ) {
@@ -564,13 +564,13 @@ struct EffectsPanel: View {
                 .font(.headline)
 
             VStack(spacing: 12) {
-                AdjustmentSlider(title: "Brightness", value: $brightness, icon: "sun.max") {
+                VideoAdjustmentSlider(title: "Brightness", value: $brightness, icon: "sun.max") {
                     editor.adjustBrightness(brightness)
                 }
-                AdjustmentSlider(title: "Contrast", value: $contrast, icon: "circle.lefthalf.filled") {
+                VideoAdjustmentSlider(title: "Contrast", value: $contrast, icon: "circle.lefthalf.filled") {
                     editor.adjustContrast(contrast)
                 }
-                AdjustmentSlider(title: "Saturation", value: $saturation, icon: "paintpalette") {
+                VideoAdjustmentSlider(title: "Saturation", value: $saturation, icon: "paintpalette") {
                     editor.adjustSaturation(saturation)
                 }
             }
@@ -603,7 +603,7 @@ struct EffectsPanel: View {
 // MARK: - Text Overlay Panel
 // ─────────────────────────────────────────────────────────────────────────────
 
-struct TextOverlayPanel: View {
+struct VideoTextOverlayPanel: View {
     @ObservedObject var editor: VideoEditor
     @Environment(\.dismiss) private var dismiss
 
@@ -651,7 +651,7 @@ struct TextOverlayPanel: View {
 // MARK: - Audio Panel
 // ─────────────────────────────────────────────────────────────────────────────
 
-struct AudioPanel: View {
+struct VideoAudioPanel: View {
     @ObservedObject var editor: VideoEditor
     @Environment(\.dismiss) private var dismiss
     @State private var volume: Double = 0.7
@@ -701,7 +701,7 @@ struct AudioPanel: View {
 // MARK: - Export Sheet
 // ─────────────────────────────────────────────────────────────────────────────
 
-struct ExportSheet: View {
+struct VideoExportSheet: View {
     @ObservedObject var editor: VideoEditor
     let onComplete: ((ExportResult) -> Void)?
     @Environment(\.dismiss) private var dismiss
@@ -729,7 +729,7 @@ struct ExportSheet: View {
 
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                         ForEach(SocialPlatform.allCases, id: \.self) { platform in
-                            PlatformButton(platform: platform) {
+                            VideoPlatformButton(platform: platform) {
                                 exportFor(platform)
                             }
                         }
@@ -784,7 +784,7 @@ struct ExportSheet: View {
 // MARK: - UI Components
 // ─────────────────────────────────────────────────────────────────────────────
 
-struct ToolButton: View {
+struct VideoToolButton: View {
     let icon: String
     let title: String
     let isSelected: Bool
@@ -804,7 +804,7 @@ struct ToolButton: View {
     }
 }
 
-struct FilterButton: View {
+struct VideoFilterButton: View {
     let filter: VideoFilter
     let isSelected: Bool
     let action: () -> Void
@@ -828,7 +828,7 @@ struct FilterButton: View {
     }
 }
 
-struct PlatformButton: View {
+struct VideoPlatformButton: View {
     let platform: SocialPlatform
     let action: () -> Void
 
@@ -855,7 +855,7 @@ struct PlatformButton: View {
     }
 }
 
-struct AdjustmentSlider: View {
+struct VideoAdjustmentSlider: View {
     let title: String
     @Binding var value: CGFloat
     let icon: String
