@@ -24,9 +24,7 @@ struct ContentView: View {
     @State private var isShareSheetPresented = false
     @StateObject private var photoEditor = PhotoEditorKit()
     @State private var isPhotoEditorPresented = false
-    @State private var selectedVideoEditAsset: PHAsset? = nil
-    @State private var selectedVideoEditURL: URL? = nil
-    @State private var isVideoEditorPresented = false
+    @State private var videoEditorSession: VideoEditorSession? = nil
     @State private var isPreparingPhotoEditor = false
     @State private var showEditorUnavailableAlert = false
     private let editorTargetMaxDimension: CGFloat = 2048
@@ -109,13 +107,9 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $isPhotoEditorPresented) {
             PhotoEditorSessionView(editor: photoEditor)
         }
-        .fullScreenCover(isPresented: $isVideoEditorPresented) {
-            if let asset = selectedVideoEditAsset, let url = selectedVideoEditURL {
-                VideoEditorView(asset: asset, videoURL: url) {
-                    isVideoEditorPresented = false
-                    selectedVideoEditAsset = nil
-                    selectedVideoEditURL = nil
-                }
+        .fullScreenCover(item: $videoEditorSession) { session in
+            VideoEditorView(asset: session.asset, videoURL: session.videoURL) {
+                videoEditorSession = nil
             }
         }
         .alert("Photo editor unavailable", isPresented: $showEditorUnavailableAlert) {
@@ -406,9 +400,7 @@ struct ContentView: View {
         guard let url = await videoShareURL(for: asset) else { return }
 
         await MainActor.run {
-            selectedVideoEditAsset = asset
-            selectedVideoEditURL = url
-            isVideoEditorPresented = true
+            videoEditorSession = VideoEditorSession(asset: asset, videoURL: url)
         }
     }
 
@@ -591,6 +583,12 @@ struct ContentView: View {
             }
         }
     }
+}
+
+private struct VideoEditorSession: Identifiable {
+    let id = UUID()
+    let asset: PHAsset
+    let videoURL: URL
 }
 
 #Preview { ContentView() }
