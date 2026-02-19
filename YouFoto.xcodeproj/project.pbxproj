@@ -63,6 +63,11 @@
 			path = PhotoSDK;
 			sourceTree = "<group>";
 		};
+		97C4C0372F46F489005FE90C /* VideoSDK */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = VideoSDK;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -93,6 +98,7 @@
 		97A60D8C2F44AB400078C4C2 = {
 			isa = PBXGroup;
 			children = (
+				97C4C0372F46F489005FE90C /* VideoSDK */,
 				97C4BFEA2F452DB0005FE90C /* PhotoSDK */,
 				97A60D972F44AB400078C4C2 /* YouFoto */,
 				97A60DA72F44AB430078C4C2 /* YouFotoTests */,
@@ -129,6 +135,7 @@
 			fileSystemSynchronizedGroups = (
 				97A60D972F44AB400078C4C2 /* YouFoto */,
 				97C4BFEA2F452DB0005FE90C /* PhotoSDK */,
+				97C4C0372F46F489005FE90C /* VideoSDK */,
 			);
 			name = YouFoto;
 			packageProductDependencies = (
