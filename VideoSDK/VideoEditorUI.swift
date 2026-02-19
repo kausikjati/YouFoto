@@ -217,7 +217,7 @@ public struct VideoEditorView: View {
                 Button(role: .destructive) {
                     if let selectedClip,
                        let index = editor.timeline.clips.firstIndex(where: { $0.id == selectedClip.id }) {
-                        editor.timeline.removeClip(at: index)
+                        editor.timeline.delete(clipAt: index)
                         selectedClipID = editor.timeline.clips.first?.id
                     }
                 } label: {
