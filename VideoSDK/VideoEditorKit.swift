@@ -3,10 +3,13 @@
 //  Professional Video Editor SDK for iOS
 //
 
-import SwiftUI
+import Foundation
+import Combine
 import AVFoundation
 import Photos
 import CoreImage
+import CoreGraphics
+import UIKit
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MARK: - VideoEditor Main Class
@@ -33,7 +36,7 @@ public class VideoEditor: ObservableObject {
     private var player: AVPlayer?
     private var playerItem: AVPlayerItem?
     private var composition: AVMutableComposition?
-    private var videoComposition: AVMutableVideoComposition?
+    private var videoComposition: AVVideoComposition?
     
     // ── Callbacks ─────────────────────────────────────────────────────────────
     public var onExportProgress: ((Double) -> Void)?
@@ -230,7 +233,7 @@ public class VideoEditor: ObservableObject {
     
     public func chromaKey(video: URL, keyColor: UIColor, tolerance: CGFloat, background: URL) async throws {
         // Chroma key implementation
-        let result = await ai.removeBackground(from: video, keyColor: keyColor, tolerance: tolerance)
+        _ = await ai.removeBackground(from: video, keyColor: keyColor, tolerance: tolerance)
         // Composite with background
     }
     
@@ -263,14 +266,19 @@ public class VideoEditor: ObservableObject {
         }
         
         // Build video composition for effects
-        buildVideoComposition()
+        Task { [weak self] in
+            await self?.buildVideoComposition()
+        }
     }
     
-    private func buildVideoComposition() {
+    private func buildVideoComposition() async {
         guard let composition = composition else { return }
         
-        videoComposition = AVMutableVideoComposition(propertiesOf: composition)
-        videoComposition?.frameDuration = CMTime(value: 1, timescale: 30)  // 30fps
+        do {
+            videoComposition = try await AVVideoComposition.videoComposition(withPropertiesOf: composition)
+        } catch {
+            videoComposition = nil
+        }
         
         // Apply filters, transitions, overlays
         // This is where effects are rendered
@@ -505,7 +513,7 @@ public struct VideoOverlay: Identifiable {
         case emoji(String)
     }
     
-    public enum OverlayPosition {
+    public enum OverlayPosition: Hashable {
         case top, center, bottom, custom(CGPoint)
     }
     
@@ -605,4 +613,69 @@ public enum VideoError: Error {
     case noComposition
     case exportFailed
     case invalidURL
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - Internal Engine Stubs
+// ─────────────────────────────────────────────────────────────────────────────
+
+public final class AudioMixer {
+    public init() {}
+}
+
+public final class AIEngine {
+    public init() {}
+
+    public func detectOptimalCrop(for _: URL, targetRatio ratio: AspectRatio, focus _: CropFocus) async -> CGRect {
+        let target = ratio.size
+        return CGRect(origin: .zero, size: target)
+    }
+
+    public func removeBackground(from video: URL, keyColor _: UIColor, tolerance _: CGFloat) async -> URL {
+        video
+    }
+}
+
+public final class FilterEngine {
+    private var customFilters: [String: (CIImage) -> CIImage] = [:]
+
+    public init() {}
+
+    public func registerCustomFilter(_ name: String, processor: @escaping (CIImage) -> CIImage) {
+        customFilters[name] = processor
+    }
+}
+
+public final class TransitionEngine {
+    private var customTransitions: [String: (Double, CIImage, CIImage) -> CIImage] = [:]
+
+    public init() {}
+
+    public func registerCustomTransition(_ name: String, animator: @escaping (Double, CIImage, CIImage) -> CIImage) {
+        customTransitions[name] = animator
+    }
+}
+
+public final class ExportManager {
+    public init() {}
+
+    public func export(
+        composition _: AVComposition,
+        videoComposition _: AVVideoComposition?,
+        options: ExportOptions,
+        progress: ((Double) -> Void)? = nil
+    ) async throws -> ExportResult {
+        progress?(1.0)
+
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("export-\(UUID().uuidString)")
+            .appendingPathExtension("mp4")
+
+        return ExportResult(
+            outputURL: outputURL,
+            duration: 0,
+            fileSize: 0,
+            resolution: options.quality.size
+        )
+    }
 }
