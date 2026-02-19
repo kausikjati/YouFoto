@@ -286,6 +286,7 @@ struct VideoTimelineView: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 10)
         }
+        .animation(.spring(response: 0.25, dampingFraction: 0.86), value: selectedClipID)
     }
 }
 
@@ -294,31 +295,80 @@ struct ClipThumbnail: View {
     let isSelected: Bool
 
     @State private var thumbnailImage: UIImage?
+    @State private var trimStartRatio: CGFloat = 0
+    @State private var trimEndRatio: CGFloat = 1
+
+    private var tileWidth: CGFloat { isSelected ? 220 : 104 }
+    private var fullDuration: Double { max(clip.trimEnd, clip.duration + clip.trimStart, 0.1) }
+    private var trimmedDuration: Double {
+        max(0.05, Double(trimEndRatio - trimStartRatio) * fullDuration)
+    }
 
     var body: some View {
         RoundedRectangle(cornerRadius: 12)
             .fill(isSelected ? .white.opacity(0.28) : .white.opacity(0.16))
-            .frame(width: 104, height: 72)
+            .frame(width: tileWidth, height: 72)
             .overlay {
-                Group {
-                    if let thumbnailImage {
-                        Image(uiImage: thumbnailImage)
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        ZStack {
-                            Color.white.opacity(0.08)
-                            Image(systemName: "film")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.75))
+                GeometryReader { geo in
+                    ZStack {
+                        Group {
+                            if let thumbnailImage {
+                                Image(uiImage: thumbnailImage)
+                                    .resizable()
+                                    .scaledToFill()
+                            } else {
+                                ZStack {
+                                    Color.white.opacity(0.08)
+                                    Image(systemName: "film")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.75))
+                                }
+                            }
+                        }
+
+                        if isSelected {
+                            let lead = trimStartRatio * geo.size.width
+                            let trail = (1 - trimEndRatio) * geo.size.width
+
+                            HStack(spacing: 0) {
+                                Color.black.opacity(0.50).frame(width: max(0, lead))
+                                Color.clear
+                                Color.black.opacity(0.50).frame(width: max(0, trail))
+                            }
+
+                            Circle()
+                                .fill(Color.white.opacity(0.95))
+                                .frame(width: 10, height: 10)
+                                .position(x: lead, y: geo.size.height / 2)
+                                .gesture(
+                                    DragGesture(minimumDistance: 0)
+                                        .onChanged { value in
+                                            let next = min(max(0, value.location.x / geo.size.width), trimEndRatio - 0.05)
+                                            trimStartRatio = next
+                                            applyTrim()
+                                        }
+                                )
+
+                            Circle()
+                                .fill(Color.white.opacity(0.95))
+                                .frame(width: 10, height: 10)
+                                .position(x: trimEndRatio * geo.size.width, y: geo.size.height / 2)
+                                .gesture(
+                                    DragGesture(minimumDistance: 0)
+                                        .onChanged { value in
+                                            let next = max(min(1, value.location.x / geo.size.width), trimStartRatio + 0.05)
+                                            trimEndRatio = next
+                                            applyTrim()
+                                        }
+                                )
                         }
                     }
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 10))
                 .padding(4)
             }
             .overlay(alignment: .bottomTrailing) {
-                Text(String(format: "%.1fs", clip.duration))
+                Text(String(format: "%.1fs", trimmedDuration))
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 6)
@@ -330,7 +380,30 @@ struct ClipThumbnail: View {
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(isSelected ? Color.white.opacity(0.85) : Color.clear, lineWidth: 1.5)
             }
-            .onAppear(perform: loadThumbnail)
+            .animation(.spring(response: 0.24, dampingFraction: 0.84), value: isSelected)
+            .onAppear {
+                loadThumbnail()
+                syncRatiosFromClip()
+            }
+            .onChange(of: isSelected) { _, selected in
+                if selected {
+                    syncRatiosFromClip()
+                }
+            }
+    }
+
+    private func syncRatiosFromClip() {
+        let duration = fullDuration
+        guard duration > 0 else { return }
+        trimStartRatio = CGFloat(max(0, min(1, clip.trimStart / duration)))
+        trimEndRatio = CGFloat(max(trimStartRatio + 0.05, min(1, clip.trimEnd / duration)))
+    }
+
+    private func applyTrim() {
+        let duration = fullDuration
+        clip.trimStart = Double(trimStartRatio) * duration
+        clip.trimEnd = Double(trimEndRatio) * duration
+        clip.duration = max(0.05, clip.trimEnd - clip.trimStart)
     }
 
     private func loadThumbnail() {
@@ -339,7 +412,7 @@ struct ClipThumbnail: View {
         let asset = AVAsset(url: clip.url)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 280, height: 280)
+        generator.maximumSize = CGSize(width: 420, height: 280)
 
         Task.detached {
             let cgImage = try? generator.copyCGImage(at: .zero, actualTime: nil)
